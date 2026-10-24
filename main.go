@@ -22,7 +22,10 @@ func main() {
 		fmt.Fprintln(w, "hello qubica!")
 	})
 
-	mux.HandleFunc("GET /shows", show.List)
+	store := show.NewStore()
+	handler := show.NewHandler(store)
+	mux.HandleFunc("GET /shows", handler.List)
+	mux.HandleFunc("GET /shows/{id}", handler.Get)
 
 	log.Println("Server running at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", mux))
