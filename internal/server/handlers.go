@@ -1,4 +1,4 @@
-package show
+package server
 
 import (
 	"encoding/json"
@@ -7,43 +7,33 @@ import (
 	"strconv"
 )
 
-type Handler struct {
-	store *Store
-}
-
-func NewHandler(store *Store) *Handler {
-	return &Handler{store: store}
-}
-
-func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listShows(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	encoder := json.NewEncoder(w)
 	// waste space, but the json then is more readable
 	encoder.SetIndent("", "  ")
 
-	if err := encoder.Encode(h.store.List()); err != nil {
+	if err := encoder.Encode(s.store.ListShows()); err != nil {
 		log.Printf("encode shows: %v", err)
 	}
 }
 
-func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+func (s *Server) getShow(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id <= 0 {
 		http.Error(w, "invalid show ID", http.StatusBadRequest)
 		return
 	}
-
-	show, ok := h.store.Get(id)
+	show, ok := s.store.GetShow(id)
 	if !ok {
 		http.Error(w, "show not found", http.StatusNotFound)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(show); err != nil {
-		log.Printf("encode show: %v", err)
+		log.Printf("encode response: %v", err)
 	}
 }
