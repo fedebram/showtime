@@ -13,7 +13,12 @@ func List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(shows); err != nil {
+
+	encoder := json.NewEncoder(w)
+	// waste space, but the json then is more readable
+	encoder.SetIndent("", "  ")
+
+	if err := encoder.Encode(shows); err != nil {
 		log.Printf("encode shows: %v", err)
 	}
 }
