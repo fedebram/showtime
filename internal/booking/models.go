@@ -1,5 +1,10 @@
 package booking
 
+import (
+	"fmt"
+	"time"
+)
+
 // right now we place everything inside booking. It is fine like that
 
 // Room represents a screening room in the cinema.
@@ -29,4 +34,64 @@ type Reservation struct {
 	ID      int   `json:"id"`
 	ShowID  int   `json:"show_id"`
 	SeatIDs []int `json:"seat_ids"`
+}
+
+// Booking groups reservations and tracks their status.
+type Booking struct {
+	ID             int           `json:"id"`
+	Status         BookingStatus `json:"status"`
+	ReservationIDs []int         `json:"reservation_ids"`
+	CreatedAt      time.Time     `json:"created_at"`
+	ExpiresAt      time.Time     `json:"expires_at"`
+	AccessToken    string        `json:"-"`
+}
+
+type BookingStatus string
+
+const (
+	BookingPending   BookingStatus = "pending"
+	BookingConfirmed BookingStatus = "confirmed"
+	BookingExpired   BookingStatus = "expired"
+	BookingCancelled BookingStatus = "cancelled"
+)
+
+// a reservation request is more like a public api contract.
+
+type ReservationRequest struct {
+	ShowID   int   `json:"show_id"`
+	SeatIDs  []int `json:"seat_ids"`
+	Quantity int   `json:"quantity"`
+}
+
+// TODO: return multiple validation fields errors. map?
+
+func (r *ReservationRequest) Validate() error {
+	if r.ShowID <= 0 {
+		return fmt.Errorf("show_id must be positive")
+	}
+	if r.Quantity < 0 {
+		return fmt.Errorf("quantity cannot be negative")
+	}
+
+	// nil slice or also empty slice length is 0
+	hasSeats := len(r.SeatIDs) > 0
+	hasQuantity := r.Quantity > 0
+
+	// require exactly one of seat_ids or a positive quantity
+	if hasSeats == hasQuantity {
+		return fmt.Errorf("specify either seat_ids or a positive quantity")
+	}
+
+	seen := make(map[int]bool)
+	for _, id := range r.SeatIDs {
+		if id <= 0 {
+			return fmt.Errorf("seat IDs must be positive")
+		}
+		if seen[id] {
+			return fmt.Errorf("duplicate seat ID: %d", id)
+		}
+		seen[id] = true
+	}
+
+	return nil
 }

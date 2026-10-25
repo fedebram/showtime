@@ -76,6 +76,11 @@ func (m *MemoryStore) AvailableSeats(showID int) ([]booking.Seat, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.availableSeats(showID)
+}
+
+// availableSeats requires the caller to hold the store mutex.
+func (m *MemoryStore) availableSeats(showID int) ([]booking.Seat, error) {
 	show, ok := m.shows[showID]
 	if !ok {
 		return nil, fmt.Errorf("show %d not found", showID)

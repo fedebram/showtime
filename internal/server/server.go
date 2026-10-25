@@ -16,6 +16,7 @@ func NewServer(memory *store.MemoryStore) *Server {
 	s.mux.HandleFunc("GET /shows", s.listShows)
 	s.mux.HandleFunc("GET /shows/{id}", s.getShow)
 	s.mux.HandleFunc("GET /shows/{id}/seats", s.listAvailableSeats)
+	s.mux.HandleFunc("POST /bookings", s.createBooking)
 	return s
 }
 
