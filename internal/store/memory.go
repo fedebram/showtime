@@ -1,21 +1,47 @@
 package store
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/fedebram/showtime/internal/booking"
 )
 
 type MemoryStore struct {
-	shows map[int]booking.Show
+	shows        map[int]booking.Show
+	rooms        map[int]booking.Room
+	seats        map[int]booking.Seat
+	reservations map[int]booking.Reservation
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		shows: map[int]booking.Show{
 			1: {ID: 1, MovieTitle: "The Big Lebowski", RoomID: 1, StartsAt: "2026-10-24T18:00:00+02:00"},
-			2: {ID: 2, MovieTitle: "The Flintstones", RoomID: 1, StartsAt: "2026-10-24T21:00:00+02:00"},
+			2: {ID: 2, MovieTitle: "The Flintstones", RoomID: 2, StartsAt: "2026-10-24T21:00:00+02:00"},
 		},
+		rooms: map[int]booking.Room{
+			1: {ID: 1, Name: "Room 1"},
+			2: {ID: 2, Name: "Room 2"},
+		},
+		seats: map[int]booking.Seat{
+			// Room 1 seats.
+			1: {ID: 1, RoomID: 1, Row: "A", Number: 1},
+			2: {ID: 2, RoomID: 1, Row: "A", Number: 2},
+			3: {ID: 3, RoomID: 1, Row: "A", Number: 3},
+			4: {ID: 4, RoomID: 1, Row: "B", Number: 1},
+			5: {ID: 5, RoomID: 1, Row: "B", Number: 2},
+			6: {ID: 6, RoomID: 1, Row: "B", Number: 3},
+
+			// Room 2 seats.
+			7:  {ID: 7, RoomID: 2, Row: "A", Number: 1},
+			8:  {ID: 8, RoomID: 2, Row: "A", Number: 2},
+			9:  {ID: 9, RoomID: 2, Row: "A", Number: 3},
+			10: {ID: 10, RoomID: 2, Row: "B", Number: 1},
+			11: {ID: 11, RoomID: 2, Row: "B", Number: 2},
+			12: {ID: 12, RoomID: 2, Row: "B", Number: 3},
+		},
+		reservations: make(map[int]booking.Reservation),
 	}
 }
 
@@ -33,4 +59,44 @@ func (m *MemoryStore) ListShows() []booking.Show {
 func (m *MemoryStore) GetShow(id int) (booking.Show, bool) {
 	show, ok := m.shows[id]
 	return show, ok
+}
+
+// AvailableSeats is mostly a business logic function.
+// The store was intended as an abastraction for the implementation of multiple dbs.
+// Doesn't make sense now to layering a repository to place the business logic there.
+
+func (m *MemoryStore) AvailableSeats(showID int) ([]booking.Seat, error) {
+	show, ok := m.GetShow(showID)
+	if !ok {
+		return nil, fmt.Errorf("show %d not found", showID)
+	}
+
+	// we can make separate functions to handle this. Not so useful now.
+
+	// seatID -> reserved or not (bool)
+	reserved := make(map[int]bool)
+	for _, reservation := range m.reservations {
+		if reservation.ShowID == showID {
+			for _, seatID := range reservation.SeatIDs {
+				reserved[seatID] = true
+			}
+		}
+	}
+
+	// from all the seats on the room, we retain the non reserved ones.
+	// this way we have the available seats for the show.
+
+	available := make([]booking.Seat, 0)
+	for _, seat := range m.seats {
+		if seat.RoomID == show.RoomID && !reserved[seat.ID] {
+			available = append(available, seat)
+		}
+	}
+
+	// determinist ordering
+	sort.Slice(available, func(i, j int) bool {
+		return available[i].ID < available[j].ID
+	})
+
+	return available, nil
 }

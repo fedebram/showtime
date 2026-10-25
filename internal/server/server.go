@@ -15,6 +15,7 @@ func NewServer(memory *store.MemoryStore) *Server {
 	s := &Server{store: memory, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /shows", s.listShows)
 	s.mux.HandleFunc("GET /shows/{id}", s.getShow)
+	s.mux.HandleFunc("GET /shows/{id}/seats", s.listAvailableSeats)
 	return s
 }
 
