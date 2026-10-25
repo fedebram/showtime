@@ -3,11 +3,13 @@ package store
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/fedebram/showtime/internal/booking"
 )
 
 type MemoryStore struct {
+	mu           sync.Mutex
 	shows        map[int]booking.Show
 	rooms        map[int]booking.Room
 	seats        map[int]booking.Seat
@@ -46,10 +48,13 @@ func NewMemoryStore() *MemoryStore {
 }
 
 func (m *MemoryStore) ListShows() []booking.Show {
+	m.mu.Lock()
 	shows := make([]booking.Show, 0, len(m.shows))
 	for _, show := range m.shows {
 		shows = append(shows, show)
 	}
+	m.mu.Unlock()
+
 	sort.Slice(shows, func(i, j int) bool {
 		return shows[i].ID < shows[j].ID
 	})
@@ -57,6 +62,8 @@ func (m *MemoryStore) ListShows() []booking.Show {
 }
 
 func (m *MemoryStore) GetShow(id int) (booking.Show, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	show, ok := m.shows[id]
 	return show, ok
 }
@@ -66,7 +73,10 @@ func (m *MemoryStore) GetShow(id int) (booking.Show, bool) {
 // Doesn't make sense now to layering a repository to place the business logic there.
 
 func (m *MemoryStore) AvailableSeats(showID int) ([]booking.Seat, error) {
-	show, ok := m.GetShow(showID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	show, ok := m.shows[showID]
 	if !ok {
 		return nil, fmt.Errorf("show %d not found", showID)
 	}
