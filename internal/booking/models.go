@@ -31,19 +31,24 @@ type Seat struct {
 
 // Reservation records seats booked for a show.
 type Reservation struct {
-	ID      int   `json:"id"`
-	ShowID  int   `json:"show_id"`
-	SeatIDs []int `json:"seat_ids"`
+	ID        int   `json:"id"`
+	BookingID int   `json:"booking_id"`
+	ShowID    int   `json:"show_id"`
+	SeatIDs   []int `json:"seat_ids"`
 }
 
 // Booking groups reservations and tracks their status.
 type Booking struct {
-	ID             int           `json:"id"`
-	Status         BookingStatus `json:"status"`
-	ReservationIDs []int         `json:"reservation_ids"`
-	CreatedAt      time.Time     `json:"created_at"`
-	ExpiresAt      time.Time     `json:"expires_at"`
-	AccessToken    string        `json:"-"`
+	ID        int           `json:"id"`
+	Status    BookingStatus `json:"status"`
+	CreatedAt time.Time     `json:"created_at"`
+	ExpiresAt time.Time     `json:"expires_at"`
+	TokenHash string        `json:"-"`
+}
+
+func (b Booking) HoldsSeats(now time.Time) bool {
+	return b.Status == BookingConfirmed ||
+		(b.Status == BookingPending && now.Before(b.ExpiresAt))
 }
 
 type BookingStatus string

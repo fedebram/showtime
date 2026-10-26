@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/fedebram/showtime/internal/booking"
 )
@@ -14,6 +15,7 @@ type MemoryStore struct {
 	rooms        map[int]booking.Room
 	seats        map[int]booking.Seat
 	reservations map[int]booking.Reservation
+	bookings     map[int]booking.Booking
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -44,6 +46,7 @@ func NewMemoryStore() *MemoryStore {
 			12: {ID: 12, RoomID: 2, Row: "B", Number: 3},
 		},
 		reservations: make(map[int]booking.Reservation),
+		bookings:     make(map[int]booking.Booking),
 	}
 }
 
@@ -86,15 +89,20 @@ func (m *MemoryStore) availableSeats(showID int) ([]booking.Seat, error) {
 		return nil, fmt.Errorf("show %d not found", showID)
 	}
 
-	// we can make separate functions to handle this. Not so useful now.
-
+	now := time.Now()
 	// seatID -> reserved or not (bool)
 	reserved := make(map[int]bool)
 	for _, reservation := range m.reservations {
-		if reservation.ShowID == showID {
-			for _, seatID := range reservation.SeatIDs {
-				reserved[seatID] = true
-			}
+		if reservation.ShowID != showID {
+			continue
+		}
+		// if the booking is expired or cancelled
+		// we don't count the seats as reserved!
+		if !m.bookings[reservation.BookingID].HoldsSeats(now) {
+			continue
+		}
+		for _, seatID := range reservation.SeatIDs {
+			reserved[seatID] = true
 		}
 	}
 
