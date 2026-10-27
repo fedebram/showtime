@@ -183,3 +183,21 @@ func (m *MemoryStore) CreateBooking(tokenHash string, reqs []booking.Reservation
 
 	return b, reservations, nil
 }
+
+func (m *MemoryStore) ListReservations(bookingID int) []booking.Reservation {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// one to many, foreign key like
+	reservations := make([]booking.Reservation, 0)
+	for _, reservation := range m.reservations {
+		if reservation.BookingID == bookingID {
+			reservations = append(reservations, reservation)
+		}
+	}
+
+	sort.Slice(reservations, func(i, j int) bool {
+		return reservations[i].ID < reservations[j].ID
+	})
+	return reservations
+}

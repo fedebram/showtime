@@ -40,7 +40,7 @@ type Reservation struct {
 // Booking groups reservations and tracks their status.
 type Booking struct {
 	ID        int           `json:"id"`
-	Status    BookingStatus `json:"status"`
+	Status    BookingStatus `json:"status"` // lazy: use CurrentStatus to read it
 	CreatedAt time.Time     `json:"created_at"`
 	ExpiresAt time.Time     `json:"expires_at"`
 	TokenHash string        `json:"-"`
@@ -49,6 +49,15 @@ type Booking struct {
 func (b Booking) HoldsSeats(now time.Time) bool {
 	return b.Status == BookingConfirmed ||
 		(b.Status == BookingPending && now.Before(b.ExpiresAt))
+}
+
+// CurrentStatus returns expired if the booking is pending and its time is over.
+// otherwise the stored status.
+func (b Booking) CurrentStatus(now time.Time) BookingStatus {
+	if b.Status == BookingPending && !now.Before(b.ExpiresAt) {
+		return BookingExpired
+	}
+	return b.Status
 }
 
 type BookingStatus string

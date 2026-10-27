@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/fedebram/showtime/internal/booking"
 	"github.com/fedebram/showtime/internal/store"
@@ -108,4 +109,20 @@ type CreateBookingResponse struct {
 	Booking      booking.Booking       `json:"booking"`
 	Reservations []booking.Reservation `json:"reservations"`
 	Token        string                `json:"token"`
+}
+
+type BookingResponse struct {
+	Booking      booking.Booking       `json:"booking"`
+	Reservations []booking.Reservation `json:"reservations"`
+}
+
+func (s *Server) getBooking(w http.ResponseWriter, r *http.Request) {
+	b := bookingFrom(r.Context())
+
+	b.Status = b.CurrentStatus(time.Now())
+
+	writeJSON(w, http.StatusOK, BookingResponse{
+		Booking:      b,
+		Reservations: s.store.ListReservations(b.ID),
+	})
 }

@@ -38,5 +38,6 @@ func (s *Server) requireBookingToken(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func bookingFrom(ctx context.Context) booking.Booking {
+	// it panics if we don't set the key!! which is nice
 	return ctx.Value(bookingKey{}).(booking.Booking)
 }

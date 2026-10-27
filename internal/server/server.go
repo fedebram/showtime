@@ -22,10 +22,10 @@ func NewServer(memory *store.MemoryStore) *Server {
 	// restish convention.
 	// these routes need the booking token to be accessed.
 	s.mux.HandleFunc("GET /bookings/{id}", s.requireBookingToken(s.getBooking))
-	s.mux.HandleFunc("DELETE /bookings/{id}", s.requireBookingToken(s.cancelBooking))
-	s.mux.HandleFunc("POST /bookings/{id}/confirm", s.requireBookingToken(s.confirmBooking))
-	s.mux.HandleFunc("POST /bookings/{id}/reservations", s.requireBookingToken(s.addReservations))
-	s.mux.HandleFunc("DELETE /bookings/{id}/reservations/{rid}", s.requireBookingToken(s.removeReservation))
+	s.mux.HandleFunc("DELETE /bookings/{id}", s.requireBookingToken(notImplemented))
+	s.mux.HandleFunc("POST /bookings/{id}/confirm", s.requireBookingToken(notImplemented))
+	s.mux.HandleFunc("POST /bookings/{id}/reservations", s.requireBookingToken(notImplemented))
+	s.mux.HandleFunc("DELETE /bookings/{id}/reservations/{rid}", s.requireBookingToken(notImplemented))
 
 	return s
 }
@@ -34,4 +34,9 @@ func NewServer(memory *store.MemoryStore) *Server {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// notImplemented is a placeholder for routes we haven't written yet.
+func notImplemented(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
 }
