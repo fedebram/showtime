@@ -148,18 +148,9 @@ func (m *MemoryStore) CreateBooking(tokenHash string, reqs []booking.Reservation
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	reservations := make([]booking.Reservation, 0, len(reqs))
-	for _, req := range reqs {
-		available, err := m.availableSeats(req.ShowID)
-		if err != nil {
-			return booking.Booking{}, nil, err
-		}
-
-		seatIDs, err := booking.AssignSeats(available, req)
-		if err != nil {
-			return booking.Booking{}, nil, err
-		}
-		reservations = append(reservations, booking.Reservation{ShowID: req.ShowID, SeatIDs: seatIDs})
+	reservations, err := m.assignReservations(reqs)
+	if err != nil {
+		return booking.Booking{}, nil, err
 	}
 
 	// save to the store
@@ -174,14 +165,34 @@ func (m *MemoryStore) CreateBooking(tokenHash string, reqs []booking.Reservation
 	}
 	m.bookings[b.ID] = b
 
+	m.saveReservations(b.ID, reservations)
+
+	return b, reservations, nil
+}
+
+func (m *MemoryStore) assignReservations(reqs []booking.ReservationRequest) ([]booking.Reservation, error) {
+	reservations := make([]booking.Reservation, 0, len(reqs))
+	for _, req := range reqs {
+		available, err := m.availableSeats(req.ShowID)
+		if err != nil {
+			return nil, err
+		}
+		seatIDs, err := booking.AssignSeats(available, req)
+		if err != nil {
+			return nil, err
+		}
+		reservations = append(reservations, booking.Reservation{ShowID: req.ShowID, SeatIDs: seatIDs})
+	}
+	return reservations, nil
+}
+
+func (m *MemoryStore) saveReservations(bookingID int, reservations []booking.Reservation) {
 	for i := range reservations {
 		m.lastReservationID++
 		reservations[i].ID = m.lastReservationID
-		reservations[i].BookingID = b.ID
+		reservations[i].BookingID = bookingID
 		m.reservations[reservations[i].ID] = reservations[i]
 	}
-
-	return b, reservations, nil
 }
 
 func (m *MemoryStore) ListReservations(bookingID int) []booking.Reservation {
