@@ -22,10 +22,10 @@ func NewServer(memory *store.MemoryStore) *Server {
 	// restish convention.
 	// these routes need the booking token to be accessed.
 	s.mux.HandleFunc("GET /bookings/{id}", s.requireBookingToken(s.getBooking))
-	s.mux.HandleFunc("DELETE /bookings/{id}", s.requireBookingToken(notImplemented))
-	s.mux.HandleFunc("POST /bookings/{id}/confirm", s.requireBookingToken(notImplemented))
+	s.mux.HandleFunc("DELETE /bookings/{id}", s.requireBookingToken(s.cancelBooking))
+	s.mux.HandleFunc("POST /bookings/{id}/confirm", s.requireBookingToken(s.confirmBooking))
 	s.mux.HandleFunc("POST /bookings/{id}/reservations", s.requireBookingToken(notImplemented))
-	s.mux.HandleFunc("DELETE /bookings/{id}/reservations/{rid}", s.requireBookingToken(notImplemented))
+	s.mux.HandleFunc("DELETE /bookings/{id}/reservations/{rid}", s.requireBookingToken(s.removeReservation))
 
 	return s
 }

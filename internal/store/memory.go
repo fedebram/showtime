@@ -212,3 +212,76 @@ func (m *MemoryStore) ListReservations(bookingID int) []booking.Reservation {
 	})
 	return reservations
 }
+
+// RemoveReservation deletes a reservation from a pending booking.
+func (m *MemoryStore) RemoveReservation(bookingID, reservationID int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	b, ok := m.bookings[bookingID]
+	if !ok {
+		return fmt.Errorf("booking %d not found", bookingID)
+	}
+	if b.CurrentStatus(time.Now()) != booking.BookingPending {
+		return booking.ErrBookingNotPending
+	}
+
+	// it must belong to this booking, otherwise you could delete someone else's
+	reservation, ok := m.reservations[reservationID]
+	if !ok || reservation.BookingID != bookingID {
+		return booking.ErrReservationNotFound
+	}
+
+	delete(m.reservations, reservationID)
+	return nil
+}
+
+// CancelBooking moves a pending or confirmed booking to cancelled.
+func (m *MemoryStore) CancelBooking(id int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	b, ok := m.bookings[id]
+	if !ok {
+		return fmt.Errorf("booking %d not found", id)
+	}
+	switch b.CurrentStatus(time.Now()) {
+	case booking.BookingPending, booking.BookingConfirmed:
+	default:
+		return booking.ErrBookingNotActive
+	}
+
+	b.Status = booking.BookingCancelled
+	m.bookings[id] = b
+	return nil
+}
+
+// ConfirmBooking moves a pending booking to confirmed. seats stay held.
+func (m *MemoryStore) ConfirmBooking(id int) (booking.Booking, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	b, ok := m.bookings[id]
+	if !ok {
+		return booking.Booking{}, fmt.Errorf("booking %d not found", id)
+	}
+	if b.CurrentStatus(time.Now()) != booking.BookingPending {
+		return booking.Booking{}, booking.ErrBookingNotPending
+	}
+
+	// an empty booking can't be confirmed
+	hasReservations := false
+	for _, reservation := range m.reservations {
+		if reservation.BookingID == id {
+			hasReservations = true
+			break
+		}
+	}
+	if !hasReservations {
+		return booking.Booking{}, booking.ErrBookingEmpty
+	}
+
+	b.Status = booking.BookingConfirmed
+	m.bookings[id] = b
+	return b, nil
+}

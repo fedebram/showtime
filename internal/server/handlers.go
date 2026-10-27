@@ -4,13 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/fedebram/showtime/internal/booking"
-	"github.com/fedebram/showtime/internal/store"
 	"github.com/fedebram/showtime/internal/token"
 )
 
@@ -84,16 +82,8 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	secret, hash := token.GenerateToken()
 
 	b, reservations, err := s.store.CreateBooking(hash, req.Reservations)
-	switch {
-	case errors.Is(err, store.ErrShowNotFound):
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	case errors.Is(err, booking.ErrSeatUnavailable), errors.Is(err, booking.ErrNotEnoughSeats):
-		http.Error(w, err.Error(), http.StatusConflict)
-		return
-	case err != nil:
-		log.Printf("create booking: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if err != nil {
+		writeBookingError(w, err)
 		return
 	}
 
@@ -125,4 +115,41 @@ func (s *Server) getBooking(w http.ResponseWriter, r *http.Request) {
 		Booking:      b,
 		Reservations: s.store.ListReservations(b.ID),
 	})
+}
+
+func (s *Server) confirmBooking(w http.ResponseWriter, r *http.Request) {
+	b := bookingFrom(r.Context())
+
+	confirmed, err := s.store.ConfirmBooking(b.ID)
+	if err != nil {
+		writeBookingError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, confirmed)
+}
+
+func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
+	b := bookingFrom(r.Context())
+
+	if err := s.store.CancelBooking(b.ID); err != nil {
+		writeBookingError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) removeReservation(w http.ResponseWriter, r *http.Request) {
+	b := bookingFrom(r.Context())
+
+	rid, err := strconv.Atoi(r.PathValue("rid"))
+	if err != nil || rid <= 0 {
+		http.Error(w, "invalid reservation ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.RemoveReservation(b.ID, rid); err != nil {
+		writeBookingError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
