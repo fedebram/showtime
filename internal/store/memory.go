@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,6 +10,8 @@ import (
 	"github.com/fedebram/showtime/internal/booking"
 )
 
+var ErrShowNotFound = errors.New("show not found")
+
 type MemoryStore struct {
 	mu           sync.Mutex
 	shows        map[int]booking.Show
@@ -16,6 +19,11 @@ type MemoryStore struct {
 	seats        map[int]booking.Seat
 	reservations map[int]booking.Reservation
 	bookings     map[int]booking.Booking
+
+	// last used IDs, incremented on every insert
+	// TODO: move to uuid
+	lastBookingID     int
+	lastReservationID int
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -86,7 +94,7 @@ func (m *MemoryStore) AvailableSeats(showID int) ([]booking.Seat, error) {
 func (m *MemoryStore) availableSeats(showID int) ([]booking.Seat, error) {
 	show, ok := m.shows[showID]
 	if !ok {
-		return nil, fmt.Errorf("show %d not found", showID)
+		return nil, fmt.Errorf("%w: %d", ErrShowNotFound, showID)
 	}
 
 	now := time.Now()
@@ -122,4 +130,48 @@ func (m *MemoryStore) availableSeats(showID int) ([]booking.Seat, error) {
 	})
 
 	return available, nil
+}
+
+func (m *MemoryStore) CreateBooking(tokenHash string, reqs []booking.ReservationRequest) (booking.Booking, []booking.Reservation, error) {
+	if err := booking.ValidateReservations(reqs); err != nil {
+		return booking.Booking{}, nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reservations := make([]booking.Reservation, 0, len(reqs))
+	for _, req := range reqs {
+		available, err := m.availableSeats(req.ShowID)
+		if err != nil {
+			return booking.Booking{}, nil, err
+		}
+
+		seatIDs, err := booking.AssignSeats(available, req)
+		if err != nil {
+			return booking.Booking{}, nil, err
+		}
+		reservations = append(reservations, booking.Reservation{ShowID: req.ShowID, SeatIDs: seatIDs})
+	}
+
+	// save to the store
+	now := time.Now()
+	m.lastBookingID++
+	b := booking.Booking{
+		ID:        m.lastBookingID,
+		Status:    booking.BookingPending,
+		CreatedAt: now,
+		ExpiresAt: now.Add(booking.HoldDuration),
+		TokenHash: tokenHash,
+	}
+	m.bookings[b.ID] = b
+
+	for i := range reservations {
+		m.lastReservationID++
+		reservations[i].ID = m.lastReservationID
+		reservations[i].BookingID = b.ID
+		m.reservations[reservations[i].ID] = reservations[i]
+	}
+
+	return b, reservations, nil
 }

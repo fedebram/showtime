@@ -100,3 +100,22 @@ func (r *ReservationRequest) Validate() error {
 
 	return nil
 }
+
+func ValidateReservations(reqs []ReservationRequest) error {
+	// we enforce 1 reservation -> 1 show
+	// you can't make multiple reservation requests for the same show.
+
+	// an empty list is valid.
+
+	seenShows := make(map[int]bool)
+	for _, reservation := range reqs {
+		if err := reservation.Validate(); err != nil {
+			return err
+		}
+		if seenShows[reservation.ShowID] {
+			return fmt.Errorf("duplicate show_id: %d", reservation.ShowID)
+		}
+		seenShows[reservation.ShowID] = true
+	}
+	return nil
+}

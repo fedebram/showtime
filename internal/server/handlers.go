@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/fedebram/showtime/internal/booking"
+	"github.com/fedebram/showtime/internal/store"
 	"github.com/fedebram/showtime/internal/token"
 )
 
@@ -71,12 +73,39 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, reservation := range req.Reservations {
-		if err := reservation.Validate(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	// if the body is empty the validation doesn't return an error.
+	// it is good. when creating the booking, we are free to specify or not the reservations.
+	if err := booking.ValidateReservations(req.Reservations); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	secret, hash := token.GenerateToken()
+
+	b, reservations, err := s.store.CreateBooking(hash, req.Reservations)
+	switch {
+	case errors.Is(err, store.ErrShowNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	case errors.Is(err, booking.ErrSeatUnavailable), errors.Is(err, booking.ErrNotEnoughSeats):
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	case err != nil:
+		log.Printf("create booking: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// the secret is returned only here. the client sends it back as a bearer, we store only its hash
+	writeJSON(w, http.StatusCreated, CreateBookingResponse{
+		Booking:      b,
+		Reservations: reservations,
+		Token:        secret,
+	})
+}
+
+type CreateBookingResponse struct {
+	Booking      booking.Booking       `json:"booking"`
+	Reservations []booking.Reservation `json:"reservations"`
+	Token        string                `json:"token"`
 }
