@@ -79,6 +79,14 @@ func (m *MemoryStore) GetShow(id int) (booking.Show, bool) {
 	return show, ok
 }
 
+func (m *MemoryStore) GetBooking(id int) (booking.Booking, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	booking, ok := m.bookings[id]
+	return booking, ok
+}
+
 // AvailableSeats is mostly a business logic function.
 // The store was intended as an abastraction for the implementation of multiple dbs.
 // Doesn't make sense now to layering a repository to place the business logic there.

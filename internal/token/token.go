@@ -3,6 +3,7 @@ package token
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 )
 
@@ -22,4 +23,11 @@ func GenerateToken() (secret string, hash string) {
 	hash = hex.EncodeToString(digest[:])
 
 	return
+}
+
+// Matches reports if secret hashes to hash.
+func Matches(secret, hash string) bool {
+	digest := sha256.Sum256([]byte(secret))
+	// to prevent timing attack
+	return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(digest[:])), []byte(hash)) == 1
 }
