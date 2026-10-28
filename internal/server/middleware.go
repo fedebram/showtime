@@ -34,6 +34,9 @@ func (s *Server) requireBookingToken(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "booking not found", http.StatusNotFound)
 			return
 		}
+
+		ctx := context.WithValue(r.Context(), bookingKey{}, b)
+		next(w, r.WithContext(ctx))
 	}
 }
 
