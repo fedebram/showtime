@@ -13,22 +13,38 @@ import (
 	"github.com/fedebram/showtime/internal/booking/memory"
 )
 
+func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
+
+// update runs fn inside repo.Update and fails the test on error.
+func update(t *testing.T, repo *memory.Repository, fn func(tx booking.Tx) error) {
+	t.Helper()
+	if err := repo.Update(context.Background(), fn); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListShowsInCreationOrder(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewRepository()
 
-	first := booking.Show{ID: uuid.Must(uuid.NewV7()), MovieTitle: "The Big Lebowski"}
-	second := booking.Show{ID: uuid.Must(uuid.NewV7()), MovieTitle: "The Flintstones"}
+	first := booking.Show{ID: newID(), MovieTitle: "The Big Lebowski"}
+	second := booking.Show{ID: newID(), MovieTitle: "The Flintstones"}
 
 	// inserted in reverse.
-	// but the result list but be in creation order
-	for _, show := range []booking.Show{second, first} {
-		if err := repo.InsertShow(ctx, show); err != nil {
-			t.Fatal(err)
+	// but the result list must be in creation order
+	update(t, repo, func(tx booking.Tx) error {
+		if err := tx.InsertShow(ctx, second); err != nil {
+			return err
 		}
-	}
+		return tx.InsertShow(ctx, first)
+	})
 
-	shows, err := repo.ListShows(ctx)
+	var shows []booking.Show
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		var err error
+		shows, err = tx.ListShows(ctx)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,12 +57,15 @@ func TestGetShow(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewRepository()
 
-	want := booking.Show{ID: uuid.Must(uuid.NewV7()), MovieTitle: "The Big Lebowski"}
-	if err := repo.InsertShow(ctx, want); err != nil {
-		t.Fatal(err)
-	}
+	want := booking.Show{ID: newID(), MovieTitle: "The Big Lebowski"}
+	update(t, repo, func(tx booking.Tx) error { return tx.InsertShow(ctx, want) })
 
-	got, err := repo.GetShow(ctx, want.ID)
+	var got booking.Show
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		var err error
+		got, err = tx.GetShow(ctx, want.ID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,9 +75,13 @@ func TestGetShow(t *testing.T) {
 }
 
 func TestGetShowNotFound(t *testing.T) {
+	ctx := context.Background()
 	repo := memory.NewRepository()
 
-	_, err := repo.GetShow(context.Background(), uuid.Must(uuid.NewV7()))
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		_, err := tx.GetShow(ctx, newID())
+		return err
+	})
 	if !errors.Is(err, booking.ErrShowNotFound) {
 		t.Fatalf("got %v, want ErrShowNotFound", err)
 	}
@@ -68,12 +91,15 @@ func TestGetBooking(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewRepository()
 
-	want := booking.Booking{ID: uuid.Must(uuid.NewV7()), Status: booking.BookingPending}
-	if err := repo.InsertBooking(ctx, want); err != nil {
-		t.Fatal(err)
-	}
+	want := booking.Booking{ID: newID(), Status: booking.BookingPending}
+	update(t, repo, func(tx booking.Tx) error { return tx.InsertBooking(ctx, want) })
 
-	got, err := repo.GetBooking(ctx, want.ID)
+	var got booking.Booking
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		var err error
+		got, err = tx.GetBooking(ctx, want.ID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,9 +109,49 @@ func TestGetBooking(t *testing.T) {
 }
 
 func TestGetBookingNotFound(t *testing.T) {
+	ctx := context.Background()
 	repo := memory.NewRepository()
 
-	_, err := repo.GetBooking(context.Background(), uuid.Must(uuid.NewV7()))
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		_, err := tx.GetBooking(ctx, newID())
+		return err
+	})
+	if !errors.Is(err, booking.ErrBookingNotFound) {
+		t.Fatalf("got %v, want ErrBookingNotFound", err)
+	}
+}
+
+func TestUpdateBooking(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRepository()
+
+	b := booking.Booking{ID: newID(), Status: booking.BookingPending}
+	update(t, repo, func(tx booking.Tx) error { return tx.InsertBooking(ctx, b) })
+
+	b.Status = booking.BookingCancelled
+	update(t, repo, func(tx booking.Tx) error { return tx.UpdateBooking(ctx, b) })
+
+	var got booking.Booking
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		var err error
+		got, err = tx.GetBooking(ctx, b.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != booking.BookingCancelled {
+		t.Fatalf("got %s, want cancelled", got.Status)
+	}
+}
+
+func TestUpdateBookingNotFound(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRepository()
+
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		return tx.UpdateBooking(ctx, booking.Booking{ID: newID()})
+	})
 	if !errors.Is(err, booking.ErrBookingNotFound) {
 		t.Fatalf("got %v, want ErrBookingNotFound", err)
 	}
@@ -95,23 +161,59 @@ func TestListReservations(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewRepository()
 
-	mine, other := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
-	first := booking.Reservation{ID: uuid.Must(uuid.NewV7()), BookingID: mine}
-	second := booking.Reservation{ID: uuid.Must(uuid.NewV7()), BookingID: mine}
-	notMine := booking.Reservation{ID: uuid.Must(uuid.NewV7()), BookingID: other}
+	mine, other := newID(), newID()
+	first := booking.Reservation{ID: newID(), BookingID: mine}
+	second := booking.Reservation{ID: newID(), BookingID: mine}
+	notMine := booking.Reservation{ID: newID(), BookingID: other}
 
 	// inserted out of order, with another booking's reservation in between
-	for _, res := range []booking.Reservation{second, notMine, first} {
-		if err := repo.InsertReservation(ctx, res); err != nil {
-			t.Fatal(err)
+	update(t, repo, func(tx booking.Tx) error {
+		for _, res := range []booking.Reservation{second, notMine, first} {
+			if err := tx.InsertReservation(ctx, res); err != nil {
+				return err
+			}
 		}
-	}
+		return nil
+	})
 
-	got, err := repo.ListReservations(ctx, mine)
+	var got []booking.Reservation
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		var err error
+		got, err = tx.ListReservations(ctx, mine)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].ID != first.ID || got[1].ID != second.ID {
 		t.Fatalf("got %v, want %s then %s", got, first.ID, second.ID)
+	}
+}
+
+func TestUpdateRollsBack(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRepository()
+
+	b := booking.Booking{ID: newID()}
+	failure := errors.New("something went wrong")
+
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		if err := tx.InsertBooking(ctx, b); err != nil {
+			return err
+		}
+		// fail after the insert. the insert must be undone.
+		// ROLLBACK!!
+		return failure
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("got %v, want the failure", err)
+	}
+
+	err = repo.View(ctx, func(tx booking.Tx) error {
+		_, err := tx.GetBooking(ctx, b.ID)
+		return err
+	})
+	if !errors.Is(err, booking.ErrBookingNotFound) {
+		t.Fatalf("insert was not undone: %v", err)
 	}
 }
