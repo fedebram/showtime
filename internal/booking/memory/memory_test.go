@@ -217,3 +217,48 @@ func TestUpdateRollsBack(t *testing.T) {
 		t.Fatalf("insert was not undone: %v", err)
 	}
 }
+
+func TestDeleteReservation(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRepository()
+
+	mine, other := newID(), newID()
+	res := booking.Reservation{ID: newID(), BookingID: mine}
+	update(t, repo, func(tx booking.Tx) error { return tx.InsertReservation(ctx, res) })
+
+	// you can't delete a reservation that is from another booking (different uuid)
+	t.Run("another booking's", func(t *testing.T) {
+		err := repo.Update(ctx, func(tx booking.Tx) error {
+			return tx.DeleteReservation(ctx, other, res.ID)
+		})
+		if !errors.Is(err, booking.ErrReservationNotFound) {
+			t.Fatalf("got %v, want ErrReservationNotFound", err)
+		}
+	})
+
+	t.Run("its own", func(t *testing.T) {
+		update(t, repo, func(tx booking.Tx) error { return tx.DeleteReservation(ctx, mine, res.ID) })
+
+		var got []booking.Reservation
+		err := repo.View(ctx, func(tx booking.Tx) error {
+			var err error
+			got, err = tx.ListReservations(ctx, mine)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("got %v, want no reservations", got)
+		}
+	})
+
+	t.Run("already deleted", func(t *testing.T) {
+		err := repo.Update(ctx, func(tx booking.Tx) error {
+			return tx.DeleteReservation(ctx, mine, res.ID)
+		})
+		if !errors.Is(err, booking.ErrReservationNotFound) {
+			t.Fatalf("got %v, want ErrReservationNotFound", err)
+		}
+	})
+}

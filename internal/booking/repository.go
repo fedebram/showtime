@@ -39,4 +39,7 @@ type Tx interface {
 	ListReservations(ctx context.Context, bookingID uuid.UUID) ([]Reservation, error)
 	// InsertReservation saves a new reservation. reservation ID must already be set.
 	InsertReservation(ctx context.Context, r Reservation) error
+	// DeleteReservation removes a reservation of a booking. If the reservation
+	// doesn't exist or belongs to another booking, the error wraps ErrReservationNotFound.
+	DeleteReservation(ctx context.Context, bookingID, reservationID uuid.UUID) error
 }

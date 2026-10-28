@@ -148,3 +148,13 @@ func (t *txRepo) InsertReservation(ctx context.Context, res booking.Reservation)
 	t.reservations[res.ID] = res
 	return nil
 }
+
+func (t *txRepo) DeleteReservation(ctx context.Context, bookingID, reservationID uuid.UUID) error {
+	// it must belong to this booking, otherwise you could delete someone else's
+	res, ok := t.reservations[reservationID]
+	if !ok || res.BookingID != bookingID {
+		return fmt.Errorf("%w: %s", booking.ErrReservationNotFound, reservationID)
+	}
+	delete(t.reservations, reservationID)
+	return nil
+}

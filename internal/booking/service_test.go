@@ -216,3 +216,59 @@ func TestConfirmBooking(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveReservation(t *testing.T) {
+	ctx := context.Background()
+	duringHold := created.Add(time.Minute)
+	afterHold := created.Add(booking.HoldDuration)
+
+	cases := []struct {
+		name         string
+		status       booking.BookingStatus
+		now          time.Time
+		otherBooking bool // try to remove it through a different booking
+		wantErr      error
+	}{
+		{"pending", booking.BookingPending, duringHold, false, nil},
+		{"expired", booking.BookingPending, afterHold, false, booking.ErrBookingNotPending},
+		{"confirmed", booking.BookingConfirmed, duringHold, false, booking.ErrBookingNotPending},
+		{"not this booking's", booking.BookingPending, duringHold, true, booking.ErrReservationNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := pendingBooking()
+			b.Status = tc.status
+			res := booking.Reservation{ID: newID(), BookingID: b.ID}
+			repo := newRepo(t, b, res)
+
+			bookingID := b.ID
+			if tc.otherBooking {
+				other := pendingBooking()
+				if err := repo.Update(ctx, func(tx booking.Tx) error { return tx.InsertBooking(ctx, other) }); err != nil {
+					t.Fatal(err)
+				}
+				bookingID = other.ID
+			}
+			svc := booking.NewService(repo, clockAt(tc.now))
+
+			err := svc.RemoveReservation(ctx, bookingID, res.ID)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("got error %v, want %v", err, tc.wantErr)
+			}
+
+			// the reservation is gone only if the call succeeded
+			_, reservations, err := svc.GetBooking(ctx, b.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wantLeft := 1; tc.wantErr == nil {
+				wantLeft = 0
+				if len(reservations) != wantLeft {
+					t.Fatalf("got %d reservations, want %d", len(reservations), wantLeft)
+				}
+			} else if len(reservations) != wantLeft {
+				t.Fatalf("got %d reservations, want %d", len(reservations), wantLeft)
+			}
+		})
+	}
+}

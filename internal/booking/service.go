@@ -119,3 +119,18 @@ func (s *Service) ConfirmBooking(ctx context.Context, id uuid.UUID) (Booking, er
 	}
 	return b, nil
 }
+
+// RemoveReservation removes a reservation from a pending booking.
+// Its seats are free again immediately.
+func (s *Service) RemoveReservation(ctx context.Context, bookingID, reservationID uuid.UUID) error {
+	return s.repo.Update(ctx, func(tx Tx) error {
+		b, err := tx.GetBooking(ctx, bookingID)
+		if err != nil {
+			return err
+		}
+		if b.CurrentStatus(s.now()) != BookingPending {
+			return ErrBookingNotPending
+		}
+		return tx.DeleteReservation(ctx, bookingID, reservationID)
+	})
+}
