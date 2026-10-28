@@ -2,8 +2,10 @@ package booking
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/fedebram/showtime/internal/token"
 	"github.com/google/uuid"
 )
 
@@ -23,4 +25,17 @@ func (s *Service) ListShows(ctx context.Context) ([]Show, error) {
 
 func (s *Service) GetShow(ctx context.Context, id uuid.UUID) (Show, error) {
 	return s.repo.GetShow(ctx, id)
+}
+
+// Authenticate returns the booking if secret is its token.
+// A missing booking and a wrong token both give ErrBookingNotFound.
+func (s *Service) Authenticate(ctx context.Context, id uuid.UUID, secret string) (Booking, error) {
+	b, err := s.repo.GetBooking(ctx, id)
+	if err != nil {
+		return Booking{}, err
+	}
+	if !token.Matches(secret, b.TokenHash) {
+		return Booking{}, fmt.Errorf("%w: %s", ErrBookingNotFound, id)
+	}
+	return b, nil
 }
