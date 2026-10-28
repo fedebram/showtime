@@ -47,4 +47,13 @@ type Tx interface {
 	// DeleteReservation removes a reservation of a booking. If the reservation
 	// doesn't exist or belongs to another booking, the error wraps ErrReservationNotFound.
 	DeleteReservation(ctx context.Context, bookingID, reservationID uuid.UUID) error
+	// ListShowReservations returns every reservation of a show together with
+	// its booking, whatever the booking's status.
+	ListShowReservations(ctx context.Context, showID uuid.UUID) ([]ShowReservation, error)
+}
+
+// ShowReservation is a reservation of a show together with its booking.
+type ShowReservation struct {
+	Reservation
+	Booking Booking
 }

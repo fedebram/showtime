@@ -39,6 +39,61 @@ func (s *Service) GetShow(ctx context.Context, id uuid.UUID) (Show, error) {
 	return show, err
 }
 
+// SeatMap returns every seat of the show's room, each available or held.
+func (s *Service) SeatMap(ctx context.Context, showID uuid.UUID) ([]SeatAvailability, error) {
+	var seatMap []SeatAvailability
+	err := s.repo.View(ctx, func(tx Tx) error {
+		show, err := tx.GetShow(ctx, showID)
+		if err != nil {
+			return err
+		}
+		seats, err := tx.ListSeats(ctx, show.RoomID)
+		if err != nil {
+			return err
+		}
+		taken, err := s.takenSeats(ctx, tx, showID)
+		if err != nil {
+			return err
+		}
+
+		seatMap = make([]SeatAvailability, 0, len(seats))
+		for _, seat := range seats {
+			status := SeatAvailable
+			if taken[seat.ID] {
+				status = SeatHeld
+			}
+			seatMap = append(seatMap, SeatAvailability{Seat: seat, Status: status})
+		}
+		return nil
+	})
+	return seatMap, err
+}
+
+// takenSeats returns the seats of a show held by active bookings:
+// confirmed, or pending and not expired.
+// it takes tx so it runs inside the caller's transaction.
+func (s *Service) takenSeats(ctx context.Context, tx Tx, showID uuid.UUID) (map[uuid.UUID]bool, error) {
+	// the only downside of this is that list show reservations
+	// returns all the reservations! even the ones expired. For a show it is not a problem,
+	// but if there will be many reservations we can make a GC or filter inside the repo...
+	reservations, err := tx.ListShowReservations(ctx, showID)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	taken := make(map[uuid.UUID]bool)
+	for _, r := range reservations {
+		// expired bookings and cancelled bookings don't hold their seats.
+		if !r.Booking.HoldsSeats(now) {
+			continue
+		}
+		for _, id := range r.SeatIDs {
+			taken[id] = true
+		}
+	}
+	return taken, nil
+}
+
 // Authenticate returns the booking if secret is its token.
 // A missing booking and a wrong token both give ErrBookingNotFound.
 func (s *Service) Authenticate(ctx context.Context, id uuid.UUID, secret string) (Booking, error) {

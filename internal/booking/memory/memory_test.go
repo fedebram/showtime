@@ -303,3 +303,53 @@ func TestListSeatsSortedByRowThenNumber(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+func TestListShowReservations(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRepository()
+
+	// two bookings with a reservation for a show, one confirmed and one
+	// cancelled, and a reservation for another show
+	show, otherShow := newID(), newID()
+	confirmed := booking.Booking{ID: newID(), Status: booking.BookingConfirmed}
+	cancelled := booking.Booking{ID: newID(), Status: booking.BookingCancelled}
+	fromConfirmed := booking.Reservation{ID: newID(), BookingID: confirmed.ID, ShowID: show}
+	fromCancelled := booking.Reservation{ID: newID(), BookingID: cancelled.ID, ShowID: show}
+	otherShowRes := booking.Reservation{ID: newID(), BookingID: confirmed.ID, ShowID: otherShow}
+
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		tx.InsertBooking(ctx, confirmed)
+		tx.InsertBooking(ctx, cancelled)
+		tx.InsertReservation(ctx, fromConfirmed)
+		tx.InsertReservation(ctx, fromCancelled)
+		tx.InsertReservation(ctx, otherShowRes)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we list the reservations of the first show
+	var got []booking.ShowReservation
+	err = repo.View(ctx, func(tx booking.Tx) error {
+		got, err = tx.ListShowReservations(ctx, show)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// the reservations inserted must match
+	statusOf := make(map[uuid.UUID]booking.BookingStatus)
+	for _, r := range got {
+		if r.ShowID != show {
+			t.Fatalf("got a reservation of show %s, want only %s", r.ShowID, show)
+		}
+		statusOf[r.ID] = r.Booking.Status
+	}
+	if len(got) != 2 ||
+		statusOf[fromConfirmed.ID] != booking.BookingConfirmed ||
+		statusOf[fromCancelled.ID] != booking.BookingCancelled {
+		t.Fatalf("got %v, want the confirmed and the cancelled reservation", got)
+	}
+}

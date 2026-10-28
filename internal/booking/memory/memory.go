@@ -184,3 +184,16 @@ func (t *txRepo) DeleteReservation(ctx context.Context, bookingID, reservationID
 	delete(t.reservations, reservationID)
 	return nil
 }
+
+func (t *txRepo) ListShowReservations(ctx context.Context, showID uuid.UUID) ([]booking.ShowReservation, error) {
+	result := make([]booking.ShowReservation, 0)
+	for _, res := range t.reservations {
+		if res.ShowID == showID {
+			result = append(result, booking.ShowReservation{
+				Reservation: res,
+				Booking:     t.bookings[res.BookingID],
+			})
+		}
+	}
+	return result, nil
+}

@@ -272,3 +272,94 @@ func TestRemoveReservation(t *testing.T) {
 		})
 	}
 }
+
+func TestSeatMap(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRepository()
+	now := created.Add(time.Minute)
+
+	// a show in a room with 5 seats.
+	room := newID()
+	show := booking.Show{ID: newID(), RoomID: room}
+	a1 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 1}
+	a2 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 2}
+	a3 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 3}
+	a4 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 4}
+	b1 := booking.Seat{ID: newID(), RoomID: room, Row: "B", Number: 1}
+
+	// and one booking in each state, each holding one seat
+	confirmed := pendingBooking()
+	confirmed.Status = booking.BookingConfirmed
+	inCart := pendingBooking() // its hold lasts until created + 10 minutes
+	expired := pendingBooking()
+	expired.ExpiresAt = now.Add(-time.Second) // its hold is already over
+	cancelled := pendingBooking()
+	cancelled.Status = booking.BookingCancelled
+
+	reservation := func(b booking.Booking, seat booking.Seat) booking.Reservation {
+		return booking.Reservation{ID: newID(), BookingID: b.ID, ShowID: show.ID, SeatIDs: []uuid.UUID{seat.ID}}
+	}
+
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		tx.InsertShow(ctx, show)
+		// seats saved in a shuffled order
+		tx.InsertSeat(ctx, b1)
+		tx.InsertSeat(ctx, a3)
+		tx.InsertSeat(ctx, a1)
+		tx.InsertSeat(ctx, a4)
+		tx.InsertSeat(ctx, a2)
+
+		tx.InsertBooking(ctx, confirmed)
+		tx.InsertBooking(ctx, inCart)
+		tx.InsertBooking(ctx, expired)
+		tx.InsertBooking(ctx, cancelled)
+		tx.InsertReservation(ctx, reservation(confirmed, a1))
+		tx.InsertReservation(ctx, reservation(inCart, a2))
+		tx.InsertReservation(ctx, reservation(expired, a3))
+		tx.InsertReservation(ctx, reservation(cancelled, a4))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we ask for a seat map (all the seats of a show with their availability)
+	got, err := booking.NewService(repo, clockAt(now)).SeatMap(ctx, show.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// only the seats of active bookings are held, in row and number order
+	want := []struct {
+		seat   booking.Seat
+		status booking.SeatStatus
+	}{
+		{a1, booking.SeatHeld},      // confirmed
+		{a2, booking.SeatHeld},      // in a cart that hasn't expired
+		{a3, booking.SeatAvailable}, // the cart expired
+		{a4, booking.SeatAvailable}, // the booking was cancelled
+		{b1, booking.SeatAvailable}, // nobody booked it
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d seats, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i].ID != w.seat.ID || got[i].Status != w.status {
+			t.Errorf("position %d: got %s%d %s, want %s%d %s",
+				i, got[i].Row, got[i].Number, got[i].Status, w.seat.Row, w.seat.Number, w.status)
+		}
+	}
+}
+
+func TestSeatMapShowNotFound(t *testing.T) {
+	ctx := context.Background()
+	svc := booking.NewService(memory.NewRepository(), time.Now)
+
+	// we ask for the seat map of a show that doesn't exist
+	_, err := svc.SeatMap(ctx, newID())
+
+	// we get ErrShowNotFound
+	if !errors.Is(err, booking.ErrShowNotFound) {
+		t.Fatalf("got %v, want ErrShowNotFound", err)
+	}
+}

@@ -95,6 +95,19 @@ const (
 	BookingCancelled BookingStatus = "cancelled"
 )
 
+type SeatStatus string
+
+const (
+	SeatAvailable SeatStatus = "available"
+	SeatHeld      SeatStatus = "held"
+)
+
+// SeatAvailability is a seat of a show and whether it can be booked.
+type SeatAvailability struct {
+	Seat
+	Status SeatStatus `json:"status"`
+}
+
 // a reservation request is more like a public api contract.
 
 type ReservationRequest struct {
