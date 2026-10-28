@@ -62,6 +62,18 @@ func (b Booking) CurrentStatus(now time.Time) BookingStatus {
 	return b.Status
 }
 
+// Cancel moves a pending or confirmed booking to cancelled.
+// Expired and already cancelled bookings return ErrBookingNotActive.
+func (b *Booking) Cancel(now time.Time) error {
+	switch b.CurrentStatus(now) {
+	case BookingPending, BookingConfirmed:
+		b.Status = BookingCancelled
+		return nil
+	default:
+		return ErrBookingNotActive
+	}
+}
+
 type BookingStatus string
 
 const (

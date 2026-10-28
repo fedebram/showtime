@@ -13,16 +13,55 @@ import (
 	"github.com/fedebram/showtime/internal/token"
 )
 
-func TestAuthenticate(t *testing.T) {
+func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
+
+var created = time.Date(2026, 10, 28, 18, 0, 0, 0, time.UTC)
+
+// pendingBooking returns a booking created at created, holding its seats
+// for HoldDuration.
+func pendingBooking() booking.Booking {
+	return booking.Booking{
+		ID:        newID(),
+		Status:    booking.BookingPending,
+		CreatedAt: created,
+		ExpiresAt: created.Add(booking.HoldDuration),
+	}
+}
+
+// newRepo returns a memory repository already holding b and its reservations.
+func newRepo(t *testing.T, b booking.Booking, reservations ...booking.Reservation) *memory.Repository {
+	t.Helper()
 	ctx := context.Background()
 	repo := memory.NewRepository()
-
-	secret, hash := token.GenerateToken()
-	b := booking.Booking{ID: uuid.Must(uuid.NewV7()), Status: booking.BookingPending, TokenHash: hash}
-	if err := repo.InsertBooking(ctx, b); err != nil {
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		if err := tx.InsertBooking(ctx, b); err != nil {
+			return err
+		}
+		for _, res := range reservations {
+			if err := tx.InsertReservation(ctx, res); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	svc := booking.NewService(repo, time.Now)
+	return repo
+}
+
+// clockAt returns a clock stopped at the given time.
+func clockAt(at time.Time) func() time.Time {
+	return func() time.Time { return at }
+}
+
+func TestAuthenticate(t *testing.T) {
+	ctx := context.Background()
+
+	secret, hash := token.GenerateToken()
+	b := pendingBooking()
+	b.TokenHash = hash
+	svc := booking.NewService(newRepo(t, b), time.Now)
 
 	t.Run("right token", func(t *testing.T) {
 		got, err := svc.Authenticate(ctx, b.ID, secret)
@@ -42,9 +81,87 @@ func TestAuthenticate(t *testing.T) {
 	})
 
 	t.Run("missing booking", func(t *testing.T) {
-		_, err := svc.Authenticate(ctx, uuid.Must(uuid.NewV7()), secret)
+		_, err := svc.Authenticate(ctx, newID(), secret)
 		if !errors.Is(err, booking.ErrBookingNotFound) {
 			t.Fatalf("got %v, want ErrBookingNotFound", err)
 		}
 	})
+}
+
+func TestGetBooking(t *testing.T) {
+	ctx := context.Background()
+
+	b := pendingBooking()
+	res := booking.Reservation{ID: newID(), BookingID: b.ID}
+	repo := newRepo(t, b, res)
+
+	// here comes in handy the clock function!!
+	cases := []struct {
+		name string
+		now  time.Time
+		want booking.BookingStatus
+	}{
+		{"during the hold", b.ExpiresAt.Add(-time.Second), booking.BookingPending},
+		{"hold just over", b.ExpiresAt, booking.BookingExpired},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reservations, err := booking.NewService(repo, clockAt(tc.now)).GetBooking(ctx, b.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != tc.want {
+				t.Fatalf("status: got %s, want %s", got.Status, tc.want)
+			}
+			if len(reservations) != 1 || reservations[0].ID != res.ID {
+				t.Fatalf("reservations: got %v, want [%s]", reservations, res.ID)
+			}
+		})
+	}
+}
+
+func TestCancelBooking(t *testing.T) {
+	ctx := context.Background()
+	duringHold := created.Add(time.Minute)
+	afterHold := created.Add(booking.HoldDuration)
+
+	cases := []struct {
+		name    string
+		status  booking.BookingStatus
+		now     time.Time
+		wantErr error
+	}{
+		{"pending", booking.BookingPending, duringHold, nil},
+		{"confirmed", booking.BookingConfirmed, duringHold, nil},
+		{"expired", booking.BookingPending, afterHold, booking.ErrBookingNotActive},
+		{"already cancelled", booking.BookingCancelled, duringHold, booking.ErrBookingNotActive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := pendingBooking()
+			b.Status = tc.status
+			repo := newRepo(t, b)
+			svc := booking.NewService(repo, clockAt(tc.now))
+
+			got, err := svc.CancelBooking(ctx, b.ID)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("got error %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				return
+			}
+			if got.Status != booking.BookingCancelled {
+				t.Fatalf("returned %s, want cancelled", got.Status)
+			}
+
+			// the change must be saved, not only returned
+			stored, _, err := svc.GetBooking(ctx, b.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != booking.BookingCancelled {
+				t.Fatalf("stored %s, want cancelled", stored.Status)
+			}
+		})
+	}
 }
