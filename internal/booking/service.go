@@ -96,3 +96,26 @@ func (s *Service) CancelBooking(ctx context.Context, id uuid.UUID) (Booking, err
 	}
 	return b, nil
 }
+
+// ConfirmBooking confirms a pending booking that has reservations and returns it.
+func (s *Service) ConfirmBooking(ctx context.Context, id uuid.UUID) (Booking, error) {
+	var b Booking
+	err := s.repo.Update(ctx, func(tx Tx) error {
+		var err error
+		if b, err = tx.GetBooking(ctx, id); err != nil {
+			return err
+		}
+		reservations, err := tx.ListReservations(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := b.Confirm(s.now(), len(reservations)); err != nil {
+			return err
+		}
+		return tx.UpdateBooking(ctx, b)
+	})
+	if err != nil {
+		return Booking{}, err
+	}
+	return b, nil
+}

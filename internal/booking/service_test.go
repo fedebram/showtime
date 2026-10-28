@@ -165,3 +165,54 @@ func TestCancelBooking(t *testing.T) {
 		})
 	}
 }
+
+func TestConfirmBooking(t *testing.T) {
+	ctx := context.Background()
+	duringHold := created.Add(time.Minute)
+	afterHold := created.Add(booking.HoldDuration)
+
+	cases := []struct {
+		name            string
+		status          booking.BookingStatus
+		hasReservations bool
+		now             time.Time
+		wantErr         error
+	}{
+		{"pending with reservations", booking.BookingPending, true, duringHold, nil},
+		{"pending but empty", booking.BookingPending, false, duringHold, booking.ErrBookingEmpty},
+		{"expired", booking.BookingPending, true, afterHold, booking.ErrBookingNotPending},
+		{"already confirmed", booking.BookingConfirmed, true, duringHold, booking.ErrBookingNotPending},
+		{"cancelled", booking.BookingCancelled, true, duringHold, booking.ErrBookingNotPending},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := pendingBooking()
+			b.Status = tc.status
+			var reservations []booking.Reservation
+			if tc.hasReservations {
+				reservations = append(reservations, booking.Reservation{ID: newID(), BookingID: b.ID})
+			}
+			svc := booking.NewService(newRepo(t, b, reservations...), clockAt(tc.now))
+
+			got, err := svc.ConfirmBooking(ctx, b.ID)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("got error %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				return
+			}
+			if got.Status != booking.BookingConfirmed {
+				t.Fatalf("returned %s, want confirmed", got.Status)
+			}
+
+			// the change must be saved, not only returned
+			stored, _, err := svc.GetBooking(ctx, b.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != booking.BookingConfirmed {
+				t.Fatalf("stored %s, want confirmed", stored.Status)
+			}
+		})
+	}
+}

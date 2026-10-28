@@ -74,6 +74,18 @@ func (b *Booking) Cancel(now time.Time) error {
 	}
 }
 
+// Confirm moves a pending booking with at least one reservation to confirmed.
+func (b *Booking) Confirm(now time.Time, reservations int) error {
+	if b.CurrentStatus(now) != BookingPending {
+		return ErrBookingNotPending
+	}
+	if reservations == 0 {
+		return ErrBookingEmpty
+	}
+	b.Status = BookingConfirmed
+	return nil
+}
+
 type BookingStatus string
 
 const (
