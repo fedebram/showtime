@@ -10,6 +10,8 @@ var (
 	ErrBookingNotFound = errors.New("booking not found")
 )
 
+var ErrInvalid = errors.New("invalid request")
+
 var (
 	ErrSeatUnavailable     = errors.New("seat not available")
 	ErrNotEnoughSeats      = errors.New("not enough seats available")

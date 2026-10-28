@@ -39,6 +39,20 @@ func (s *Service) GetShow(ctx context.Context, id uuid.UUID) (Show, error) {
 	return show, err
 }
 
+type SeatStatus string
+
+const (
+	SeatAvailable SeatStatus = "available"
+	SeatHeld      SeatStatus = "held"
+)
+
+// SeatAvailability is a seat of a show and whether it can be booked.
+// It is computed on every SeatMap call, never stored.
+type SeatAvailability struct {
+	Seat
+	Status SeatStatus `json:"status"`
+}
+
 // SeatMap returns every seat of the show's room, each available or held.
 func (s *Service) SeatMap(ctx context.Context, showID uuid.UUID) ([]SeatAvailability, error) {
 	var seatMap []SeatAvailability
@@ -188,4 +202,12 @@ func (s *Service) RemoveReservation(ctx context.Context, bookingID, reservationI
 		}
 		return tx.DeleteReservation(ctx, bookingID, reservationID)
 	})
+}
+
+// ReservationRequest asks for seats of one show: either specific seat_ids,
+// or a quantity of seats the system picks.
+type ReservationRequest struct {
+	ShowID   uuid.UUID   `json:"show_id"`
+	SeatIDs  []uuid.UUID `json:"seat_ids"`
+	Quantity int         `json:"quantity"`
 }
