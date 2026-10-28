@@ -6,7 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// right now we place everything inside booking. It is fine like that
+// HoldDuration is how long a pending booking keeps its seats.
+const HoldDuration = 10 * time.Minute
 
 // Room represents a screening room in the cinema.
 type Room struct {

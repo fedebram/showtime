@@ -3,6 +3,7 @@ package booking_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -361,5 +362,142 @@ func TestSeatMapShowNotFound(t *testing.T) {
 	// we get ErrShowNotFound
 	if !errors.Is(err, booking.ErrShowNotFound) {
 		t.Fatalf("got %v, want ErrShowNotFound", err)
+	}
+}
+
+// newShow saves a show in a room with seats A1, A2, A3 and returns
+// the service, the show and the seats in row order.
+func newShow(t *testing.T) (*booking.Service, booking.Show, []booking.Seat) {
+	t.Helper()
+	ctx := context.Background()
+	repo := memory.NewRepository()
+
+	room := newID()
+	show := booking.Show{ID: newID(), RoomID: room}
+	seats := []booking.Seat{
+		{ID: newID(), RoomID: room, Row: "A", Number: 1},
+		{ID: newID(), RoomID: room, Row: "A", Number: 2},
+		{ID: newID(), RoomID: room, Row: "A", Number: 3},
+	}
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		tx.InsertShow(ctx, show)
+		for _, seat := range seats {
+			tx.InsertSeat(ctx, seat)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return booking.NewService(repo, clockAt(created)), show, seats
+}
+
+func TestCreateBookingChoosingSeats(t *testing.T) {
+	ctx := context.Background()
+	svc, show, seats := newShow(t)
+
+	// we ask for A2 and A3
+	req := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[1].ID, seats[2].ID}}
+	b, reservations, secret, err := svc.CreateBooking(ctx, []booking.ReservationRequest{req})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we get a pending booking with exactly those seats, and a token
+	if b.Status != booking.BookingPending || secret == "" {
+		t.Fatalf("got status %s and token %q, want pending and a token", b.Status, secret)
+	}
+	if len(reservations) != 1 || !slices.Equal(reservations[0].SeatIDs, req.SeatIDs) {
+		t.Fatalf("got %v, want seats A2 A3", reservations)
+	}
+}
+
+func TestCreateBookingByQuantity(t *testing.T) {
+	ctx := context.Background()
+	svc, show, seats := newShow(t)
+
+	// we ask for any 2 seats
+	req := booking.ReservationRequest{ShowID: show.ID, Quantity: 2}
+	_, reservations, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{req})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we get the first two, next to each other: A1 A2
+	want := []uuid.UUID{seats[0].ID, seats[1].ID}
+	if !slices.Equal(reservations[0].SeatIDs, want) {
+		t.Fatalf("got %v, want A1 A2", reservations[0].SeatIDs)
+	}
+}
+
+func TestCreateBookingSeatTaken(t *testing.T) {
+	ctx := context.Background()
+	svc, show, seats := newShow(t)
+	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
+
+	// someone already booked A1
+	if _, _, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{a1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// we ask for A1 too
+	_, _, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{a1})
+
+	// it's refused
+	if !errors.Is(err, booking.ErrSeatUnavailable) {
+		t.Fatalf("got %v, want ErrSeatUnavailable", err)
+	}
+}
+
+func TestCreateBookingNotEnoughSeats(t *testing.T) {
+	ctx := context.Background()
+	svc, show, _ := newShow(t)
+
+	// we ask for 4 seats in a room of 3
+	req := booking.ReservationRequest{ShowID: show.ID, Quantity: 4}
+	_, _, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{req})
+
+	// it's refused
+	if !errors.Is(err, booking.ErrNotEnoughSeats) {
+		t.Fatalf("got %v, want ErrNotEnoughSeats", err)
+	}
+}
+
+func TestCreateBookingAllOrNothing(t *testing.T) {
+	ctx := context.Background()
+	svc, show, _ := newShow(t)
+
+	// one show is fine but the other doesn't exist
+	reqs := []booking.ReservationRequest{
+		{ShowID: show.ID, Quantity: 3},
+		{ShowID: newID(), Quantity: 1},
+	}
+	_, _, _, err := svc.CreateBooking(ctx, reqs)
+
+	// the whole booking fails
+	if !errors.Is(err, booking.ErrShowNotFound) {
+		t.Fatalf("got %v, want ErrShowNotFound", err)
+	}
+	// and the first show's seats are still all free: nothing was kept
+	seatMap, err := svc.SeatMap(ctx, show.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range seatMap {
+		if s.Status != booking.SeatAvailable {
+			t.Fatalf("seat %s%d is %s, want available", s.Row, s.Number, s.Status)
+		}
+	}
+}
+
+func TestCreateBookingInvalid(t *testing.T) {
+	svc, _, _ := newShow(t)
+
+	// we send no reservations
+	_, _, _, err := svc.CreateBooking(context.Background(), nil)
+
+	// it's an invalid request
+	if !errors.Is(err, booking.ErrInvalid) {
+		t.Fatalf("got %v, want ErrInvalid", err)
 	}
 }
