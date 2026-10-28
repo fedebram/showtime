@@ -3,43 +3,45 @@ package booking
 import (
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // right now we place everything inside booking. It is fine like that
 
 // Room represents a screening room in the cinema.
 type Room struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 // Show represents a movie playing in a room at a scheduled time.
 type Show struct {
-	ID         int    `json:"id"`
-	MovieTitle string `json:"movie_title"`
-	RoomID     int    `json:"room_id"`
-	StartsAt   string `json:"starts_at"`
+	ID         uuid.UUID `json:"id"`
+	MovieTitle string    `json:"movie_title"`
+	RoomID     uuid.UUID `json:"room_id"`
+	StartsAt   string    `json:"starts_at"`
 }
 
 // Seat represents a physical seat in a room.
 type Seat struct {
-	ID     int    `json:"id"`
-	RoomID int    `json:"room_id"`
-	Row    string `json:"row"`
-	Number int    `json:"number"`
+	ID     uuid.UUID `json:"id"`
+	RoomID uuid.UUID `json:"room_id"`
+	Row    string    `json:"row"`
+	Number int       `json:"number"`
 }
 
 // Reservation records seats booked for a show.
 type Reservation struct {
-	ID        int   `json:"id"`
-	BookingID int   `json:"booking_id"`
-	ShowID    int   `json:"show_id"`
-	SeatIDs   []int `json:"seat_ids"`
+	ID        uuid.UUID   `json:"id"`
+	BookingID uuid.UUID   `json:"booking_id"`
+	ShowID    uuid.UUID   `json:"show_id"`
+	SeatIDs   []uuid.UUID `json:"seat_ids"`
 }
 
 // Booking groups reservations and tracks their status.
 type Booking struct {
-	ID        int           `json:"id"`
+	ID        uuid.UUID     `json:"id"`
 	Status    BookingStatus `json:"status"` // lazy: use CurrentStatus to read it
 	CreatedAt time.Time     `json:"created_at"`
 	ExpiresAt time.Time     `json:"expires_at"`
@@ -72,16 +74,16 @@ const (
 // a reservation request is more like a public api contract.
 
 type ReservationRequest struct {
-	ShowID   int   `json:"show_id"`
-	SeatIDs  []int `json:"seat_ids"`
-	Quantity int   `json:"quantity"`
+	ShowID   uuid.UUID   `json:"show_id"`
+	SeatIDs  []uuid.UUID `json:"seat_ids"`
+	Quantity int         `json:"quantity"`
 }
 
 // TODO: return multiple validation fields errors. map?
 
 func (r *ReservationRequest) Validate() error {
-	if r.ShowID <= 0 {
-		return fmt.Errorf("show_id must be positive")
+	if r.ShowID == uuid.Nil {
+		return fmt.Errorf("show_id is required")
 	}
 	if r.Quantity < 0 {
 		return fmt.Errorf("quantity cannot be negative")
@@ -96,13 +98,13 @@ func (r *ReservationRequest) Validate() error {
 		return fmt.Errorf("specify either seat_ids or a positive quantity")
 	}
 
-	seen := make(map[int]bool)
+	seen := make(map[uuid.UUID]bool)
 	for _, id := range r.SeatIDs {
-		if id <= 0 {
-			return fmt.Errorf("seat IDs must be positive")
+		if id == uuid.Nil {
+			return fmt.Errorf("seat IDs cannot be nil")
 		}
 		if seen[id] {
-			return fmt.Errorf("duplicate seat ID: %d", id)
+			return fmt.Errorf("duplicate seat ID: %s", id)
 		}
 		seen[id] = true
 	}
@@ -116,13 +118,13 @@ func ValidateReservations(reqs []ReservationRequest) error {
 
 	// an empty list is valid.
 
-	seenShows := make(map[int]bool)
+	seenShows := make(map[uuid.UUID]bool)
 	for _, reservation := range reqs {
 		if err := reservation.Validate(); err != nil {
 			return err
 		}
 		if seenShows[reservation.ShowID] {
-			return fmt.Errorf("duplicate show_id: %d", reservation.ShowID)
+			return fmt.Errorf("duplicate show_id: %s", reservation.ShowID)
 		}
 		seenShows[reservation.ShowID] = true
 	}

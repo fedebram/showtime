@@ -5,8 +5,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/fedebram/showtime/internal/booking"
 	"github.com/fedebram/showtime/internal/token"
@@ -20,8 +21,8 @@ func (s *Server) listShows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getShow(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id <= 0 {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
 		http.Error(w, "invalid show ID", http.StatusBadRequest)
 		return
 	}
@@ -34,8 +35,8 @@ func (s *Server) getShow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAvailableSeats(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id <= 0 {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
 		http.Error(w, "invalid show ID", http.StatusBadRequest)
 		return
 	}
@@ -141,8 +142,8 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 func (s *Server) removeReservation(w http.ResponseWriter, r *http.Request) {
 	b := bookingFrom(r.Context())
 
-	rid, err := strconv.Atoi(r.PathValue("rid"))
-	if err != nil || rid <= 0 {
+	rid, err := uuid.Parse(r.PathValue("rid"))
+	if err != nil {
 		http.Error(w, "invalid reservation ID", http.StatusBadRequest)
 		return
 	}

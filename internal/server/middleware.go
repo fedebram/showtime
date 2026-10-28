@@ -3,7 +3,8 @@ package server
 import (
 	"context"
 	"net/http"
-	"strconv"
+
+	"github.com/google/uuid"
 
 	"github.com/fedebram/showtime/internal/booking"
 	"github.com/fedebram/showtime/internal/token"
@@ -15,8 +16,8 @@ type bookingKey struct{}
 
 func (s *Server) requireBookingToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.Atoi(r.PathValue("id"))
-		if err != nil || id <= 0 {
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
 			http.Error(w, "invalid booking ID", http.StatusBadRequest)
 			return
 		}

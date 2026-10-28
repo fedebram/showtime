@@ -1,11 +1,14 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/fedebram/showtime/internal/booking"
 )
@@ -14,48 +17,58 @@ var ErrShowNotFound = errors.New("show not found")
 
 type MemoryStore struct {
 	mu           sync.Mutex
-	shows        map[int]booking.Show
-	rooms        map[int]booking.Room
-	seats        map[int]booking.Seat
-	reservations map[int]booking.Reservation
-	bookings     map[int]booking.Booking
-
-	// last used IDs, incremented on every insert
-	// TODO: move to uuid
-	lastBookingID     int
-	lastReservationID int
+	shows        map[uuid.UUID]booking.Show
+	rooms        map[uuid.UUID]booking.Room
+	seats        map[uuid.UUID]booking.Seat
+	reservations map[uuid.UUID]booking.Reservation
+	bookings     map[uuid.UUID]booking.Booking
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
-		shows: map[int]booking.Show{
-			1: {ID: 1, MovieTitle: "The Big Lebowski", RoomID: 1, StartsAt: "2026-10-24T18:00:00+02:00"},
-			2: {ID: 2, MovieTitle: "The Flintstones", RoomID: 2, StartsAt: "2026-10-24T21:00:00+02:00"},
-		},
-		rooms: map[int]booking.Room{
-			1: {ID: 1, Name: "Room 1"},
-			2: {ID: 2, Name: "Room 2"},
-		},
-		seats: map[int]booking.Seat{
-			// Room 1 seats.
-			1: {ID: 1, RoomID: 1, Row: "A", Number: 1},
-			2: {ID: 2, RoomID: 1, Row: "A", Number: 2},
-			3: {ID: 3, RoomID: 1, Row: "A", Number: 3},
-			4: {ID: 4, RoomID: 1, Row: "B", Number: 1},
-			5: {ID: 5, RoomID: 1, Row: "B", Number: 2},
-			6: {ID: 6, RoomID: 1, Row: "B", Number: 3},
-
-			// Room 2 seats.
-			7:  {ID: 7, RoomID: 2, Row: "A", Number: 1},
-			8:  {ID: 8, RoomID: 2, Row: "A", Number: 2},
-			9:  {ID: 9, RoomID: 2, Row: "A", Number: 3},
-			10: {ID: 10, RoomID: 2, Row: "B", Number: 1},
-			11: {ID: 11, RoomID: 2, Row: "B", Number: 2},
-			12: {ID: 12, RoomID: 2, Row: "B", Number: 3},
-		},
-		reservations: make(map[int]booking.Reservation),
-		bookings:     make(map[int]booking.Booking),
+	m := &MemoryStore{
+		shows:        make(map[uuid.UUID]booking.Show),
+		rooms:        make(map[uuid.UUID]booking.Room),
+		seats:        make(map[uuid.UUID]booking.Seat),
+		reservations: make(map[uuid.UUID]booking.Reservation),
+		bookings:     make(map[uuid.UUID]booking.Booking),
 	}
+
+	room1 := m.seedRoom("Room 1")
+	room2 := m.seedRoom("Room 2")
+	m.seedShow("The Big Lebowski", room1, "2026-10-24T18:00:00+02:00")
+	m.seedShow("The Flintstones", room2, "2026-10-24T21:00:00+02:00")
+
+	return m
+}
+
+// seedRoom adds a room with rows A and B of 3 seats each and returns its ID.
+func (m *MemoryStore) seedRoom(name string) uuid.UUID {
+	room := booking.Room{ID: newID(), Name: name}
+	m.rooms[room.ID] = room
+
+	for _, row := range []string{"A", "B"} {
+		for number := 1; number <= 3; number++ {
+			seat := booking.Seat{ID: newID(), RoomID: room.ID, Row: row, Number: number}
+			m.seats[seat.ID] = seat
+		}
+	}
+	return room.ID
+}
+
+func (m *MemoryStore) seedShow(title string, roomID uuid.UUID, startsAt string) {
+	show := booking.Show{ID: newID(), MovieTitle: title, RoomID: roomID, StartsAt: startsAt}
+	m.shows[show.ID] = show
+}
+
+// newID returns a time ordered uuid (v7).
+// it fails only if the random source fails.
+func newID() uuid.UUID {
+	return uuid.Must(uuid.NewV7())
+}
+
+// lessID reports whether a sorts before b.
+func lessID(a, b uuid.UUID) bool {
+	return bytes.Compare(a[:], b[:]) < 0
 }
 
 func (m *MemoryStore) ListShows() []booking.Show {
@@ -67,19 +80,19 @@ func (m *MemoryStore) ListShows() []booking.Show {
 	m.mu.Unlock()
 
 	sort.Slice(shows, func(i, j int) bool {
-		return shows[i].ID < shows[j].ID
+		return lessID(shows[i].ID, shows[j].ID)
 	})
 	return shows
 }
 
-func (m *MemoryStore) GetShow(id int) (booking.Show, bool) {
+func (m *MemoryStore) GetShow(id uuid.UUID) (booking.Show, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	show, ok := m.shows[id]
 	return show, ok
 }
 
-func (m *MemoryStore) GetBooking(id int) (booking.Booking, bool) {
+func (m *MemoryStore) GetBooking(id uuid.UUID) (booking.Booking, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -91,7 +104,7 @@ func (m *MemoryStore) GetBooking(id int) (booking.Booking, bool) {
 // The store was intended as an abastraction for the implementation of multiple dbs.
 // Doesn't make sense now to layering a repository to place the business logic there.
 
-func (m *MemoryStore) AvailableSeats(showID int) ([]booking.Seat, error) {
+func (m *MemoryStore) AvailableSeats(showID uuid.UUID) ([]booking.Seat, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -99,15 +112,15 @@ func (m *MemoryStore) AvailableSeats(showID int) ([]booking.Seat, error) {
 }
 
 // availableSeats requires the caller to hold the store mutex.
-func (m *MemoryStore) availableSeats(showID int) ([]booking.Seat, error) {
+func (m *MemoryStore) availableSeats(showID uuid.UUID) ([]booking.Seat, error) {
 	show, ok := m.shows[showID]
 	if !ok {
-		return nil, fmt.Errorf("%w: %d", ErrShowNotFound, showID)
+		return nil, fmt.Errorf("%w: %s", ErrShowNotFound, showID)
 	}
 
 	now := time.Now()
 	// seatID -> reserved or not (bool)
-	reserved := make(map[int]bool)
+	reserved := make(map[uuid.UUID]bool)
 	for _, reservation := range m.reservations {
 		if reservation.ShowID != showID {
 			continue
@@ -132,9 +145,12 @@ func (m *MemoryStore) availableSeats(showID int) ([]booking.Seat, error) {
 		}
 	}
 
-	// determinist ordering
+	// deterministic ordering, by row and then by number
 	sort.Slice(available, func(i, j int) bool {
-		return available[i].ID < available[j].ID
+		if available[i].Row != available[j].Row {
+			return available[i].Row < available[j].Row
+		}
+		return available[i].Number < available[j].Number
 	})
 
 	return available, nil
@@ -155,9 +171,8 @@ func (m *MemoryStore) CreateBooking(tokenHash string, reqs []booking.Reservation
 
 	// save to the store
 	now := time.Now()
-	m.lastBookingID++
 	b := booking.Booking{
-		ID:        m.lastBookingID,
+		ID:        newID(),
 		Status:    booking.BookingPending,
 		CreatedAt: now,
 		ExpiresAt: now.Add(booking.HoldDuration),
@@ -186,16 +201,15 @@ func (m *MemoryStore) assignReservations(reqs []booking.ReservationRequest) ([]b
 	return reservations, nil
 }
 
-func (m *MemoryStore) saveReservations(bookingID int, reservations []booking.Reservation) {
+func (m *MemoryStore) saveReservations(bookingID uuid.UUID, reservations []booking.Reservation) {
 	for i := range reservations {
-		m.lastReservationID++
-		reservations[i].ID = m.lastReservationID
+		reservations[i].ID = newID()
 		reservations[i].BookingID = bookingID
 		m.reservations[reservations[i].ID] = reservations[i]
 	}
 }
 
-func (m *MemoryStore) ListReservations(bookingID int) []booking.Reservation {
+func (m *MemoryStore) ListReservations(bookingID uuid.UUID) []booking.Reservation {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -207,20 +221,21 @@ func (m *MemoryStore) ListReservations(bookingID int) []booking.Reservation {
 		}
 	}
 
+	// v7 uuids are time ordered, so this is creation order
 	sort.Slice(reservations, func(i, j int) bool {
-		return reservations[i].ID < reservations[j].ID
+		return lessID(reservations[i].ID, reservations[j].ID)
 	})
 	return reservations
 }
 
 // RemoveReservation deletes a reservation from a pending booking.
-func (m *MemoryStore) RemoveReservation(bookingID, reservationID int) error {
+func (m *MemoryStore) RemoveReservation(bookingID, reservationID uuid.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	b, ok := m.bookings[bookingID]
 	if !ok {
-		return fmt.Errorf("booking %d not found", bookingID)
+		return fmt.Errorf("booking %s not found", bookingID)
 	}
 	if b.CurrentStatus(time.Now()) != booking.BookingPending {
 		return booking.ErrBookingNotPending
@@ -237,13 +252,13 @@ func (m *MemoryStore) RemoveReservation(bookingID, reservationID int) error {
 }
 
 // CancelBooking moves a pending or confirmed booking to cancelled.
-func (m *MemoryStore) CancelBooking(id int) error {
+func (m *MemoryStore) CancelBooking(id uuid.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	b, ok := m.bookings[id]
 	if !ok {
-		return fmt.Errorf("booking %d not found", id)
+		return fmt.Errorf("booking %s not found", id)
 	}
 	switch b.CurrentStatus(time.Now()) {
 	case booking.BookingPending, booking.BookingConfirmed:
@@ -257,13 +272,13 @@ func (m *MemoryStore) CancelBooking(id int) error {
 }
 
 // ConfirmBooking moves a pending booking to confirmed. seats stay held.
-func (m *MemoryStore) ConfirmBooking(id int) (booking.Booking, error) {
+func (m *MemoryStore) ConfirmBooking(id uuid.UUID) (booking.Booking, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	b, ok := m.bookings[id]
 	if !ok {
-		return booking.Booking{}, fmt.Errorf("booking %d not found", id)
+		return booking.Booking{}, fmt.Errorf("booking %s not found", id)
 	}
 	if b.CurrentStatus(time.Now()) != booking.BookingPending {
 		return booking.Booking{}, booking.ErrBookingNotPending
