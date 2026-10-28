@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -33,6 +34,7 @@ func NewRepository() *Repository {
 			shows:        make(map[uuid.UUID]booking.Show),
 			bookings:     make(map[uuid.UUID]booking.Booking),
 			reservations: make(map[uuid.UUID]booking.Reservation),
+			seats:        make(map[uuid.UUID]booking.Seat),
 		},
 	}
 }
@@ -72,6 +74,7 @@ type txRepo struct {
 	shows        map[uuid.UUID]booking.Show
 	bookings     map[uuid.UUID]booking.Booking
 	reservations map[uuid.UUID]booking.Reservation
+	seats        map[uuid.UUID]booking.Seat
 }
 
 // clone copies the maps, so a failed Update can be undone.
@@ -82,7 +85,30 @@ func (t *txRepo) clone() txRepo {
 		shows:        maps.Clone(t.shows),
 		bookings:     maps.Clone(t.bookings),
 		reservations: maps.Clone(t.reservations),
+		seats:        maps.Clone(t.seats),
 	}
+}
+
+func (t *txRepo) InsertSeat(ctx context.Context, s booking.Seat) error {
+	t.seats[s.ID] = s
+	return nil
+}
+
+func (t *txRepo) ListSeats(ctx context.Context, roomID uuid.UUID) ([]booking.Seat, error) {
+	seats := make([]booking.Seat, 0)
+	for _, seat := range t.seats {
+		if seat.RoomID == roomID {
+			seats = append(seats, seat)
+		}
+	}
+	// by row and then by number: A1, A2, A3, B1...
+	slices.SortFunc(seats, func(a, b booking.Seat) int {
+		if a.Row != b.Row {
+			return strings.Compare(a.Row, b.Row)
+		}
+		return a.Number - b.Number
+	})
+	return seats, nil
 }
 
 func (t *txRepo) ListShows(ctx context.Context) ([]booking.Show, error) {

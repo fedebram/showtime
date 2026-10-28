@@ -18,6 +18,11 @@ type Repository interface {
 // Tx reads and writes data inside View or Update.
 // Don't use it after fn returns.
 type Tx interface {
+	// InsertSeat saves a new seat. seat ID must already be set.
+	InsertSeat(ctx context.Context, s Seat) error
+	// ListSeats returns the seats of a room, sorted by row and then by number.
+	ListSeats(ctx context.Context, roomID uuid.UUID) ([]Seat, error)
+
 	// ListShows returns every show, in creation order.
 	ListShows(ctx context.Context) ([]Show, error)
 	// InsertShow saves a new show. show ID must already be set.

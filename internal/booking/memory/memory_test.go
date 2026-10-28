@@ -5,6 +5,7 @@ package memory_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -261,4 +262,44 @@ func TestDeleteReservation(t *testing.T) {
 			t.Fatalf("got %v, want ErrReservationNotFound", err)
 		}
 	})
+}
+
+func TestListSeatsSortedByRowThenNumber(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRepository()
+
+	// four seats of the same room
+	room := newID()
+	a1 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 1}
+	a2 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 2}
+	a10 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 10}
+	b1 := booking.Seat{ID: newID(), RoomID: room, Row: "B", Number: 1}
+
+	// we save the seats in a shuffled order
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		tx.InsertSeat(ctx, b1)
+		tx.InsertSeat(ctx, a10)
+		tx.InsertSeat(ctx, a1)
+		tx.InsertSeat(ctx, a2)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// list the seats of the room
+	var got []booking.Seat
+	err = repo.View(ctx, func(tx booking.Tx) error {
+		got, err = tx.ListSeats(ctx, room)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// they must come back sorted: A1, A2, A10, B1
+	want := []booking.Seat{a1, a2, a10, b1}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
 }
