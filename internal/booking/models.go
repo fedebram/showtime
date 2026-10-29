@@ -20,7 +20,7 @@ type Show struct {
 	ID         uuid.UUID `json:"id"`
 	MovieTitle string    `json:"movie_title"`
 	RoomID     uuid.UUID `json:"room_id"`
-	StartsAt   string    `json:"starts_at"`
+	StartsAt   time.Time `json:"starts_at"`
 }
 
 // Seat represents a physical seat in a room.
