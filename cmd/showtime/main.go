@@ -29,6 +29,8 @@ func newRootCmd() *cobra.Command {
 		Short: "Cinema bookings: the booking and notification services",
 		// a failing server is not a usage mistake: don't print the help
 		SilenceUsage: true,
+		// no "completion" command: shell autocompletion isn't needed for a server binary
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	}
 	root.AddCommand(newServeCmd())
 	return root
