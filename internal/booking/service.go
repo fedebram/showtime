@@ -250,6 +250,43 @@ func (s *Service) CreateBooking(ctx context.Context, reqs []ReservationRequest) 
 	return b, reservations, secret, nil
 }
 
+// AddReservation adds a show to a pending booking and returns the new
+// reservation. A booking has one reservation per show: to change the seats
+// of a show, remove its reservation and add it again.
+func (s *Service) AddReservation(ctx context.Context, bookingID uuid.UUID, req ReservationRequest) (Reservation, error) {
+	if err := req.Validate(); err != nil {
+		return Reservation{}, err
+	}
+
+	var res Reservation
+	err := s.repo.Update(ctx, func(tx Tx) error {
+		b, err := tx.GetBooking(ctx, bookingID)
+		if err != nil {
+			return err
+		}
+		if b.CurrentStatus(s.now()) != BookingPending {
+			return ErrBookingNotPending
+		}
+
+		existing, err := tx.ListReservations(ctx, bookingID)
+		if err != nil {
+			return err
+		}
+		for _, e := range existing {
+			if e.ShowID == req.ShowID {
+				return fmt.Errorf("%w: %s", ErrShowAlreadyBooked, req.ShowID)
+			}
+		}
+
+		res, err = s.reserve(ctx, tx, bookingID, req)
+		return err
+	})
+	if err != nil {
+		return Reservation{}, err
+	}
+	return res, nil
+}
+
 // reserve picks the seats asked by req among the free ones and saves the
 // reservation. It takes tx so it runs inside the caller's transaction.
 func (s *Service) reserve(ctx context.Context, tx Tx, bookingID uuid.UUID, req ReservationRequest) (Reservation, error) {

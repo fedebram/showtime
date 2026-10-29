@@ -501,3 +501,90 @@ func TestCreateBookingInvalid(t *testing.T) {
 		t.Fatalf("got %v, want ErrInvalid", err)
 	}
 }
+
+func TestAddReservationChangesSeats(t *testing.T) {
+	ctx := context.Background()
+	svc, show, seats := newShow(t)
+
+	// create a booking holding A1
+	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
+	b, reservations, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{a1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we remove the show and add it again with A2: changing seats
+	if err := svc.RemoveReservation(ctx, b.ID, reservations[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	a2 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[1].ID}}
+	if _, err := svc.AddReservation(ctx, b.ID, a2); err != nil {
+		t.Fatal(err)
+	}
+
+	// the booking holds only A2
+	_, got, err := svc.GetBooking(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !slices.Equal(got[0].SeatIDs, a2.SeatIDs) {
+		t.Fatalf("got %v, want only A2", got)
+	}
+}
+
+func TestAddReservationShowAlreadyInBooking(t *testing.T) {
+	ctx := context.Background()
+	svc, show, seats := newShow(t)
+
+	// we create a booking holding A1
+	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
+	b, _, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{a1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we add the same show again
+	more := booking.ReservationRequest{ShowID: show.ID, Quantity: 1}
+	_, err = svc.AddReservation(ctx, b.ID, more)
+
+	// it's refused: one reservation per show
+	if !errors.Is(err, booking.ErrShowAlreadyBooked) {
+		t.Fatalf("got %v, want ErrShowAlreadyBooked", err)
+	}
+}
+
+func TestAddReservationNotPending(t *testing.T) {
+	ctx := context.Background()
+	svc, show, seats := newShow(t)
+
+	// we create and confirm a booking
+	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
+	b, _, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{a1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ConfirmBooking(ctx, b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// if we try to add a reservation to a confirmed booking
+	_, err = svc.AddReservation(ctx, b.ID, booking.ReservationRequest{ShowID: show.ID, Quantity: 1})
+
+	// it's refused: only a pending booking can change
+	if !errors.Is(err, booking.ErrBookingNotPending) {
+		t.Fatalf("got %v, want ErrBookingNotPending", err)
+	}
+}
+
+func TestAddReservationInvalid(t *testing.T) {
+	ctx := context.Background()
+	svc, show, _ := newShow(t)
+
+	// we create a reservation request without a quantity or a show ids.
+	_, err := svc.AddReservation(ctx, newID(), booking.ReservationRequest{ShowID: show.ID})
+
+	// it's an invalid request, refused before looking at any booking
+	if !errors.Is(err, booking.ErrInvalid) {
+		t.Fatalf("got %v, want ErrInvalid", err)
+	}
+}
