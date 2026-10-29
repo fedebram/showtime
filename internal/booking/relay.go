@@ -3,7 +3,7 @@ package booking
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -29,7 +29,8 @@ func (r *Relay) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := r.Deliver(ctx); err != nil {
-				log.Printf("relay: %v", err)
+				// next tick retry
+				slog.Warn("relay: publish failed", "err", err)
 			}
 		}
 	}
@@ -50,7 +51,7 @@ func (r *Relay) Deliver(ctx context.Context) error {
 
 	for _, m := range msgs {
 		if err := r.publisher.Publish(ctx, m); err != nil {
-			return fmt.Errorf("notify %s: %w", m.ID, err)
+			return fmt.Errorf("publish %s: %w", m.ID, err)
 		}
 		// a crash before this line publishes m again.
 		// the receiver must ignore the repeat

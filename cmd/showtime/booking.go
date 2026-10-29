@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,7 +18,7 @@ import (
 
 // newServeBookingCmd runs the booking service alone.
 func newServeBookingCmd() *cobra.Command {
-	var addr, db string
+	var addr, db, notificationURL string
 	cmd := &cobra.Command{
 		Use:   "booking",
 		Short: "Run the booking service: shows, seats and bookings",
@@ -34,11 +36,26 @@ func newServeBookingCmd() *cobra.Command {
 			}
 			bookings := booking.NewService(repo, time.Now)
 
-			return serve(ctx, addr, bookingserver.NewServer(bookings))
+			relay := booking.NewRelay(repo, newHTTPPublisher(notificationURL), time.Now)
+			relayCtx, stopRelay := context.WithCancel(ctx)
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				relay.Run(relayCtx)
+			}()
+
+			err = serve(ctx, addr, bookingserver.NewServer(bookings))
+
+			stopRelay()
+			wg.Wait()
+
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", ":8080", "listen address")
 	cmd.Flags().StringVar(&db, "db", "", "SQLite database file (empty: in memory)")
+	cmd.Flags().StringVar(&notificationURL, "notification-url", "http://localhost:8081", "notification service base URL")
 	return cmd
 }
 
