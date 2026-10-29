@@ -31,6 +31,7 @@ type Repository struct {
 func NewRepository() *Repository {
 	return &Repository{
 		data: txRepo{
+			rooms:        make(map[uuid.UUID]booking.Room),
 			shows:        make(map[uuid.UUID]booking.Show),
 			bookings:     make(map[uuid.UUID]booking.Booking),
 			reservations: make(map[uuid.UUID]booking.Reservation),
@@ -71,6 +72,7 @@ func (r *Repository) Update(ctx context.Context, fn func(tx booking.Tx) error) e
 // txRepo holds the data and does the real work. It never locks:
 // it is only reachable through View and Update, which hold the mutex.
 type txRepo struct {
+	rooms        map[uuid.UUID]booking.Room
 	shows        map[uuid.UUID]booking.Show
 	bookings     map[uuid.UUID]booking.Booking
 	reservations map[uuid.UUID]booking.Reservation
@@ -82,11 +84,17 @@ type txRepo struct {
 // clone the entire repo is fine.
 func (t *txRepo) clone() txRepo {
 	return txRepo{
+		rooms:        maps.Clone(t.rooms),
 		shows:        maps.Clone(t.shows),
 		bookings:     maps.Clone(t.bookings),
 		reservations: maps.Clone(t.reservations),
 		seats:        maps.Clone(t.seats),
 	}
+}
+
+func (t *txRepo) InsertRoom(ctx context.Context, r booking.Room) error {
+	t.rooms[r.ID] = r
+	return nil
 }
 
 func (t *txRepo) InsertSeat(ctx context.Context, s booking.Seat) error {

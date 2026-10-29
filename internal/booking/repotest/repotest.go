@@ -58,16 +58,19 @@ func update(t *testing.T, repo booking.Repository, fn func(tx booking.Tx) error)
 func testListShowsInCreationOrder(t *testing.T, repo booking.Repository) {
 	ctx := context.Background()
 
-	first := booking.Show{ID: newID(), MovieTitle: "The Big Lebowski"}
-	second := booking.Show{ID: newID(), MovieTitle: "The Flintstones"}
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	first := booking.Show{ID: newID(), MovieTitle: "The Big Lebowski", RoomID: room.ID}
+	second := booking.Show{ID: newID(), MovieTitle: "The Flintstones", RoomID: room.ID}
 
 	// inserted in reverse.
 	// but the result list must be in creation order
 	update(t, repo, func(tx booking.Tx) error {
-		if err := tx.InsertShow(ctx, second); err != nil {
-			return err
-		}
-		return tx.InsertShow(ctx, first)
+		// the room first: shows point to it
+		return errors.Join(
+			tx.InsertRoom(ctx, room),
+			tx.InsertShow(ctx, second),
+			tx.InsertShow(ctx, first),
+		)
 	})
 
 	var shows []booking.Show
@@ -87,8 +90,11 @@ func testListShowsInCreationOrder(t *testing.T, repo booking.Repository) {
 func testGetShow(t *testing.T, repo booking.Repository) {
 	ctx := context.Background()
 
-	want := booking.Show{ID: newID(), MovieTitle: "The Big Lebowski"}
-	update(t, repo, func(tx booking.Tx) error { return tx.InsertShow(ctx, want) })
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	want := booking.Show{ID: newID(), MovieTitle: "The Big Lebowski", RoomID: room.ID}
+	update(t, repo, func(tx booking.Tx) error {
+		return errors.Join(tx.InsertRoom(ctx, room), tx.InsertShow(ctx, want))
+	})
 
 	var got booking.Show
 	err := repo.View(ctx, func(tx booking.Tx) error {
@@ -185,25 +191,33 @@ func testUpdateBookingNotFound(t *testing.T, repo booking.Repository) {
 func testListReservations(t *testing.T, repo booking.Repository) {
 	ctx := context.Background()
 
-	mine, other := newID(), newID()
-	first := booking.Reservation{ID: newID(), BookingID: mine}
-	second := booking.Reservation{ID: newID(), BookingID: mine}
-	notMine := booking.Reservation{ID: newID(), BookingID: other}
+	// the rows the reservations point to: a room with a show, and two bookings
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	show := booking.Show{ID: newID(), RoomID: room.ID}
+	mine := booking.Booking{ID: newID(), Status: booking.BookingPending}
+	other := booking.Booking{ID: newID(), Status: booking.BookingPending}
 
-	// inserted out of order, with another booking's reservation in between
+	first := booking.Reservation{ID: newID(), BookingID: mine.ID, ShowID: show.ID}
+	second := booking.Reservation{ID: newID(), BookingID: mine.ID, ShowID: show.ID}
+	notMine := booking.Reservation{ID: newID(), BookingID: other.ID, ShowID: show.ID}
+
 	update(t, repo, func(tx booking.Tx) error {
-		for _, res := range []booking.Reservation{second, notMine, first} {
-			if err := tx.InsertReservation(ctx, res); err != nil {
-				return err
-			}
-		}
-		return nil
+		return errors.Join(
+			tx.InsertRoom(ctx, room),
+			tx.InsertShow(ctx, show),
+			tx.InsertBooking(ctx, mine),
+			tx.InsertBooking(ctx, other),
+			// inserted out of order, with another booking's reservation in between
+			tx.InsertReservation(ctx, second),
+			tx.InsertReservation(ctx, notMine),
+			tx.InsertReservation(ctx, first),
+		)
 	})
 
 	var got []booking.Reservation
 	err := repo.View(ctx, func(tx booking.Tx) error {
 		var err error
-		got, err = tx.ListReservations(ctx, mine)
+		got, err = tx.ListReservations(ctx, mine.ID)
 		return err
 	})
 	if err != nil {
@@ -217,9 +231,21 @@ func testListReservations(t *testing.T, repo booking.Repository) {
 func testDeleteReservation(t *testing.T, repo booking.Repository) {
 	ctx := context.Background()
 
-	mine, other := newID(), newID()
-	res := booking.Reservation{ID: newID(), BookingID: mine}
-	update(t, repo, func(tx booking.Tx) error { return tx.InsertReservation(ctx, res) })
+	// the rows the reservation points to: a room with a show, and its booking
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	show := booking.Show{ID: newID(), RoomID: room.ID}
+	b := booking.Booking{ID: newID(), Status: booking.BookingPending}
+	mine, other := b.ID, newID()
+
+	res := booking.Reservation{ID: newID(), BookingID: mine, ShowID: show.ID}
+	update(t, repo, func(tx booking.Tx) error {
+		return errors.Join(
+			tx.InsertRoom(ctx, room),
+			tx.InsertShow(ctx, show),
+			tx.InsertBooking(ctx, b),
+			tx.InsertReservation(ctx, res),
+		)
+	})
 
 	// you can't delete a reservation that is from another booking (different uuid)
 	t.Run("another booking's", func(t *testing.T) {
@@ -289,19 +315,22 @@ func testListSeatsSortedByRowThenNumber(t *testing.T, repo booking.Repository) {
 	ctx := context.Background()
 
 	// four seats of the same room
-	room := newID()
-	a1 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 1}
-	a2 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 2}
-	a10 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 10}
-	b1 := booking.Seat{ID: newID(), RoomID: room, Row: "B", Number: 1}
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	a1 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "A", Number: 1}
+	a2 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "A", Number: 2}
+	a10 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "A", Number: 10}
+	b1 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "B", Number: 1}
 
-	// we save the seats in a shuffled order
 	err := repo.Update(ctx, func(tx booking.Tx) error {
-		tx.InsertSeat(ctx, b1)
-		tx.InsertSeat(ctx, a10)
-		tx.InsertSeat(ctx, a1)
-		tx.InsertSeat(ctx, a2)
-		return nil
+		return errors.Join(
+			// the room first: seats point to it
+			tx.InsertRoom(ctx, room),
+			// we save the seats in a shuffled order
+			tx.InsertSeat(ctx, b1),
+			tx.InsertSeat(ctx, a10),
+			tx.InsertSeat(ctx, a1),
+			tx.InsertSeat(ctx, a2),
+		)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +339,7 @@ func testListSeatsSortedByRowThenNumber(t *testing.T, repo booking.Repository) {
 	// list the seats of the room
 	var got []booking.Seat
 	err = repo.View(ctx, func(tx booking.Tx) error {
-		got, err = tx.ListSeats(ctx, room)
+		got, err = tx.ListSeats(ctx, room.ID)
 		return err
 	})
 	if err != nil {
@@ -329,20 +358,28 @@ func testListShowReservations(t *testing.T, repo booking.Repository) {
 
 	// two bookings with a reservation for a show, one confirmed and one
 	// cancelled, and a reservation for another show
-	show, otherShow := newID(), newID()
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	firstShow := booking.Show{ID: newID(), RoomID: room.ID}
+	otherShow := booking.Show{ID: newID(), RoomID: room.ID}
+	show := firstShow.ID
 	confirmed := booking.Booking{ID: newID(), Status: booking.BookingConfirmed}
 	cancelled := booking.Booking{ID: newID(), Status: booking.BookingCancelled}
 	fromConfirmed := booking.Reservation{ID: newID(), BookingID: confirmed.ID, ShowID: show}
 	fromCancelled := booking.Reservation{ID: newID(), BookingID: cancelled.ID, ShowID: show}
-	otherShowRes := booking.Reservation{ID: newID(), BookingID: confirmed.ID, ShowID: otherShow}
+	otherShowRes := booking.Reservation{ID: newID(), BookingID: confirmed.ID, ShowID: otherShow.ID}
 
 	err := repo.Update(ctx, func(tx booking.Tx) error {
-		tx.InsertBooking(ctx, confirmed)
-		tx.InsertBooking(ctx, cancelled)
-		tx.InsertReservation(ctx, fromConfirmed)
-		tx.InsertReservation(ctx, fromCancelled)
-		tx.InsertReservation(ctx, otherShowRes)
-		return nil
+		return errors.Join(
+			// parents first: the room, its shows, the bookings
+			tx.InsertRoom(ctx, room),
+			tx.InsertShow(ctx, firstShow),
+			tx.InsertShow(ctx, otherShow),
+			tx.InsertBooking(ctx, confirmed),
+			tx.InsertBooking(ctx, cancelled),
+			tx.InsertReservation(ctx, fromConfirmed),
+			tx.InsertReservation(ctx, fromCancelled),
+			tx.InsertReservation(ctx, otherShowRes),
+		)
 	})
 	if err != nil {
 		t.Fatal(err)

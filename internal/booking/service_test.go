@@ -280,13 +280,13 @@ func TestSeatMap(t *testing.T) {
 	now := created.Add(time.Minute)
 
 	// a show in a room with 5 seats.
-	room := newID()
-	show := booking.Show{ID: newID(), RoomID: room}
-	a1 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 1}
-	a2 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 2}
-	a3 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 3}
-	a4 := booking.Seat{ID: newID(), RoomID: room, Row: "A", Number: 4}
-	b1 := booking.Seat{ID: newID(), RoomID: room, Row: "B", Number: 1}
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	show := booking.Show{ID: newID(), RoomID: room.ID}
+	a1 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "A", Number: 1}
+	a2 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "A", Number: 2}
+	a3 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "A", Number: 3}
+	a4 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "A", Number: 4}
+	b1 := booking.Seat{ID: newID(), RoomID: room.ID, Row: "B", Number: 1}
 
 	// and one booking in each state, each holding one seat
 	confirmed := pendingBooking()
@@ -302,6 +302,8 @@ func TestSeatMap(t *testing.T) {
 	}
 
 	err := repo.Update(ctx, func(tx booking.Tx) error {
+		// the room first: seats and the show point to it
+		tx.InsertRoom(ctx, room)
 		tx.InsertShow(ctx, show)
 		// seats saved in a shuffled order
 		tx.InsertSeat(ctx, b1)
@@ -372,14 +374,16 @@ func newShow(t *testing.T) (*booking.Service, booking.Show, []booking.Seat) {
 	ctx := context.Background()
 	repo := memory.NewRepository()
 
-	room := newID()
-	show := booking.Show{ID: newID(), RoomID: room}
+	room := booking.Room{ID: newID(), Name: "Room 1"}
+	show := booking.Show{ID: newID(), RoomID: room.ID}
 	seats := []booking.Seat{
-		{ID: newID(), RoomID: room, Row: "A", Number: 1},
-		{ID: newID(), RoomID: room, Row: "A", Number: 2},
-		{ID: newID(), RoomID: room, Row: "A", Number: 3},
+		{ID: newID(), RoomID: room.ID, Row: "A", Number: 1},
+		{ID: newID(), RoomID: room.ID, Row: "A", Number: 2},
+		{ID: newID(), RoomID: room.ID, Row: "A", Number: 3},
 	}
 	err := repo.Update(ctx, func(tx booking.Tx) error {
+		// the room first: seats and the show point to it
+		tx.InsertRoom(ctx, room)
 		tx.InsertShow(ctx, show)
 		for _, seat := range seats {
 			tx.InsertSeat(ctx, seat)
