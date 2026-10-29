@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,6 +27,8 @@ func main() {
 }
 
 func run() error {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	dbPath := flag.String("db", "", "SQLite database file (empty: in memory)")
 	addr := flag.String("addr", ":8080", "listen address")
 	flag.Parse()

@@ -2,7 +2,7 @@ package server
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/fedebram/showtime/internal/booking"
@@ -28,7 +28,7 @@ func writeError(w http.ResponseWriter, err error) {
 		httpjson.WriteErrors(w, http.StatusConflict, err.Error())
 	default:
 		// never show internal details to the client
-		log.Printf("internal error: %v", err)
+		slog.Error("internal error", "err", err)
 		httpjson.WriteErrors(w, http.StatusInternalServerError, "internal error")
 	}
 }

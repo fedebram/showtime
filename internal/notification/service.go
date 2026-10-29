@@ -2,7 +2,7 @@ package notification
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -34,7 +34,11 @@ func (s *Service) Send(ctx context.Context, m Message) error {
 	// the external system might provide an idempotency key or something like that!
 
 	// the "send" is a log. A real solution would be sending an email!
-	log.Printf("notification: %s for booking %s", m.Kind, m.BookingID)
+	slog.Info("notification sent",
+		"id", m.ID,
+		"kind", m.Kind,
+		"booking_id", m.BookingID,
+	)
 
 	m.SentAt = s.now()
 	return s.repo.Insert(ctx, m)
