@@ -10,18 +10,20 @@ import (
 	"github.com/google/uuid"
 )
 
-// fakePublisher records what it publishes. Messages in fail are refused,
+// recording publisher approach comes from TDD nomenclature.
+
+// recordingPublisher records what it publishes. Messages in fail are refused,
 // like a receiver that is down.
-type fakePublisher struct {
+type recordingPublisher struct {
 	fail map[uuid.UUID]bool      // IDs to refuse
 	got  []booking.OutboxMessage // what was published, in order
 }
 
-func (f *fakePublisher) Publish(ctx context.Context, m booking.OutboxMessage) error {
-	if f.fail[m.ID] {
+func (r *recordingPublisher) Publish(ctx context.Context, m booking.OutboxMessage) error {
+	if r.fail[m.ID] {
 		return errors.New("receiver down")
 	}
-	f.got = append(f.got, m)
+	r.got = append(r.got, m)
 	return nil
 }
 
@@ -54,7 +56,7 @@ func newOutbox(t *testing.T) (booking.Repository, []booking.OutboxMessage) {
 func TestRelayDelivers(t *testing.T) {
 	ctx := context.Background()
 	repo, msgs := newOutbox(t)
-	publisher := &fakePublisher{}
+	publisher := &recordingPublisher{}
 	relay := booking.NewRelay(repo, publisher, clockAt(created))
 
 	if err := relay.Deliver(ctx); err != nil {
@@ -88,7 +90,7 @@ func TestRelayRetriesAfterFailure(t *testing.T) {
 	ctx := context.Background()
 	repo, msgs := newOutbox(t)
 	// the receiver refuses the second message
-	publisher := &fakePublisher{fail: map[uuid.UUID]bool{msgs[1].ID: true}}
+	publisher := &recordingPublisher{fail: map[uuid.UUID]bool{msgs[1].ID: true}}
 	relay := booking.NewRelay(repo, publisher, clockAt(created))
 
 	// the relay publishes the first, fails on the second and stops there
