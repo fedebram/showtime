@@ -24,6 +24,13 @@ func Seed(ctx context.Context, repo booking.Repository, now time.Time) error {
 	}
 
 	return repo.Update(ctx, func(tx booking.Tx) error {
+		existing, err := tx.ListShows(ctx)
+		if err != nil {
+			return err
+		}
+		if len(existing) > 0 {
+			return nil // already seeded
+		}
 		// rooms first: seats and shows point to them
 		for _, room := range []booking.Room{room1, room2} {
 			if err := tx.InsertRoom(ctx, room); err != nil {
