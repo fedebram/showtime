@@ -17,6 +17,7 @@ func newServeCmd() *cobra.Command {
 		Short: "Run one service",
 	}
 	cmd.AddCommand(newServeBookingCmd())
+	cmd.AddCommand(newServeNotificationCmd())
 	return cmd
 }
 
