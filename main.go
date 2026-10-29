@@ -14,9 +14,9 @@ import (
 
 	"github.com/fedebram/showtime/internal/booking"
 	"github.com/fedebram/showtime/internal/booking/memory"
+	bookingserver "github.com/fedebram/showtime/internal/booking/server"
 	"github.com/fedebram/showtime/internal/booking/sqlite"
 	"github.com/fedebram/showtime/internal/seed"
-	"github.com/fedebram/showtime/internal/server"
 )
 
 func main() {
@@ -54,7 +54,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           server.NewServer(bookings),
+		Handler:           bookingserver.NewServer(bookings),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
