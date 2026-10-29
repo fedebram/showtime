@@ -7,19 +7,19 @@ import (
 	"time"
 )
 
-// Relay delivers the unsent outbox messages to a Notifier, oldest first.
+// Relay publishes the unsent outbox messages, oldest first.
 type Relay struct {
-	repo     Repository
-	notifier Notifier
-	now      func() time.Time
-	interval time.Duration
+	repo      Repository
+	publisher Publisher
+	now       func() time.Time
+	interval  time.Duration
 }
 
-func NewRelay(repo Repository, notifier Notifier, now func() time.Time) *Relay {
-	return &Relay{repo: repo, notifier: notifier, now: now, interval: time.Second}
+func NewRelay(repo Repository, publisher Publisher, now func() time.Time) *Relay {
+	return &Relay{repo: repo, publisher: publisher, now: now, interval: time.Second}
 }
 
-// Run delivers the outbox every interval until ctx is cancelled.
+// Run publishes the outbox every interval until ctx is cancelled.
 func (r *Relay) Run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -35,7 +35,7 @@ func (r *Relay) Run(ctx context.Context) {
 	}
 }
 
-// Deliver sends the unsent messages once. It stops at the first failure:
+// Deliver publishes the unsent messages once. It stops at the first failure:
 // the rest stays in the outbox for the next try.
 func (r *Relay) Deliver(ctx context.Context) error {
 	var msgs []OutboxMessage
@@ -49,10 +49,11 @@ func (r *Relay) Deliver(ctx context.Context) error {
 	}
 
 	for _, m := range msgs {
-		// no transaction open here: never hold the database during a network call
-		if err := r.notifier.Notify(ctx, m); err != nil {
+		if err := r.publisher.Publish(ctx, m); err != nil {
 			return fmt.Errorf("notify %s: %w", m.ID, err)
 		}
+		// a crash before this line publishes m again.
+		// the receiver must ignore the repeat
 		err := r.repo.Update(ctx, func(tx Tx) error {
 			return tx.MarkOutboxSent(ctx, m.ID, r.now())
 		})
