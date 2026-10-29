@@ -287,7 +287,8 @@ func testDeleteReservation(t *testing.T, repo booking.Repository) {
 func testUpdateRollsBack(t *testing.T, repo booking.Repository) {
 	ctx := context.Background()
 
-	b := booking.Booking{ID: newID()}
+	// a valid booking: the insert must succeed, so that only the failure below undoes it
+	b := booking.Booking{ID: newID(), Status: booking.BookingPending}
 	failure := errors.New("something went wrong")
 
 	err := repo.Update(ctx, func(tx booking.Tx) error {
