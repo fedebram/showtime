@@ -1,0 +1,64 @@
+package booking
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+)
+
+// Relay delivers the unsent outbox messages to a Notifier, oldest first.
+type Relay struct {
+	repo     Repository
+	notifier Notifier
+	now      func() time.Time
+	interval time.Duration
+}
+
+func NewRelay(repo Repository, notifier Notifier, now func() time.Time) *Relay {
+	return &Relay{repo: repo, notifier: notifier, now: now, interval: time.Second}
+}
+
+// Run delivers the outbox every interval until ctx is cancelled.
+func (r *Relay) Run(ctx context.Context) {
+	ticker := time.NewTicker(r.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := r.Deliver(ctx); err != nil {
+				log.Printf("relay: %v", err)
+			}
+		}
+	}
+}
+
+// Deliver sends the unsent messages once. It stops at the first failure:
+// the rest stays in the outbox for the next try.
+func (r *Relay) Deliver(ctx context.Context) error {
+	var msgs []OutboxMessage
+	err := r.repo.View(ctx, func(tx Tx) error {
+		var err error
+		msgs, err = tx.ListUnsentOutbox(ctx, 100)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, m := range msgs {
+		// no transaction open here: never hold the database during a network call
+		if err := r.notifier.Notify(ctx, m); err != nil {
+			return fmt.Errorf("notify %s: %w", m.ID, err)
+		}
+		err := r.repo.Update(ctx, func(tx Tx) error {
+			return tx.MarkOutboxSent(ctx, m.ID, r.now())
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -53,6 +54,15 @@ type Tx interface {
 	// ListShowReservations returns every reservation of a show together with
 	// its booking, whatever the booking's status.
 	ListShowReservations(ctx context.Context, showID uuid.UUID) ([]ShowReservation, error)
+
+	// InsertOutbox saves a new outbox message. message ID must already be set.
+	InsertOutbox(ctx context.Context, m OutboxMessage) error
+	// ListUnsentOutbox returns at most limit unsent messages, oldest first.
+	ListUnsentOutbox(ctx context.Context, limit int) ([]OutboxMessage, error)
+	// MarkOutboxSent records that a message was delivered at the given time.
+	// Marking it again keeps the first time.
+	// If there is no such message, the error wraps ErrOutboxNotFound.
+	MarkOutboxSent(ctx context.Context, id uuid.UUID, at time.Time) error
 }
 
 // ShowReservation is a reservation of a show together with its booking.

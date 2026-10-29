@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/fedebram/showtime/internal/booking"
 	"github.com/google/uuid"
@@ -37,6 +38,10 @@ func Run(t *testing.T, newRepo func(t *testing.T) booking.Repository) {
 		{"ListSeatsSortedByRowThenNumber", testListSeatsSortedByRowThenNumber},
 		{"ListShowReservations", testListShowReservations},
 		{"UpdateRollsBack", testUpdateRollsBack},
+		{"ListUnsentOutboxOldestFirst", testListUnsentOutboxOldestFirst},
+		{"MarkOutboxSent", testMarkOutboxSent},
+		{"MarkOutboxSentNotFound", testMarkOutboxSentNotFound},
+		{"OutboxRollsBack", testOutboxRollsBack},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -408,5 +413,117 @@ func testListShowReservations(t *testing.T, repo booking.Repository) {
 		statusOf[fromConfirmed.ID] != booking.BookingConfirmed ||
 		statusOf[fromCancelled.ID] != booking.BookingCancelled {
 		t.Fatalf("got %v, want the confirmed and the cancelled reservation", got)
+	}
+}
+
+// listUnsentOutbox reads the unsent outbox and fails the test on error.
+func listUnsentOutbox(t *testing.T, repo booking.Repository, limit int) []booking.OutboxMessage {
+	t.Helper()
+	var msgs []booking.OutboxMessage
+	err := repo.View(context.Background(), func(tx booking.Tx) error {
+		var err error
+		msgs, err = tx.ListUnsentOutbox(context.Background(), limit)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return msgs
+}
+
+// outboxIDs returns the IDs of msgs, in order.
+func outboxIDs(msgs []booking.OutboxMessage) []uuid.UUID {
+	ids := make([]uuid.UUID, len(msgs))
+	for i, m := range msgs {
+		ids[i] = m.ID
+	}
+	return ids
+}
+
+func testListUnsentOutboxOldestFirst(t *testing.T, repo booking.Repository) {
+	ctx := context.Background()
+	b := booking.Booking{ID: newID(), Status: booking.BookingConfirmed}
+	first := booking.OutboxMessage{ID: newID(), Kind: booking.OutboxBookingConfirmed, BookingID: b.ID}
+	second := booking.OutboxMessage{ID: newID(), Kind: booking.OutboxBookingCancelled, BookingID: b.ID}
+	third := booking.OutboxMessage{ID: newID(), Kind: booking.OutboxBookingConfirmed, BookingID: b.ID}
+
+	// inserted in reverse: the list must still be oldest first
+	update(t, repo, func(tx booking.Tx) error {
+		return errors.Join(
+			tx.InsertBooking(ctx, b),
+			tx.InsertOutbox(ctx, third),
+			tx.InsertOutbox(ctx, second),
+			tx.InsertOutbox(ctx, first),
+		)
+	})
+
+	got := listUnsentOutbox(t, repo, 2)
+	want := []uuid.UUID{first.ID, second.ID}
+	if !slices.Equal(outboxIDs(got), want) {
+		t.Errorf("got %v, want %v (oldest first, at most 2)", outboxIDs(got), want)
+	}
+	if got[0].Kind != first.Kind || got[0].BookingID != b.ID {
+		t.Errorf("got %+v, want kind and booking of %+v", got[0], first)
+	}
+}
+
+func testMarkOutboxSent(t *testing.T, repo booking.Repository) {
+	ctx := context.Background()
+	b := booking.Booking{ID: newID(), Status: booking.BookingConfirmed}
+	sent := booking.OutboxMessage{ID: newID(), Kind: booking.OutboxBookingConfirmed, BookingID: b.ID}
+	unsent := booking.OutboxMessage{ID: newID(), Kind: booking.OutboxBookingConfirmed, BookingID: b.ID}
+
+	update(t, repo, func(tx booking.Tx) error {
+		return errors.Join(
+			tx.InsertBooking(ctx, b),
+			tx.InsertOutbox(ctx, sent),
+			tx.InsertOutbox(ctx, unsent),
+		)
+	})
+	// twice: marking an already sent message is not an error
+	for range 2 {
+		update(t, repo, func(tx booking.Tx) error {
+			return tx.MarkOutboxSent(ctx, sent.ID, time.Now())
+		})
+	}
+
+	got := listUnsentOutbox(t, repo, 10)
+	if want := []uuid.UUID{unsent.ID}; !slices.Equal(outboxIDs(got), want) {
+		t.Errorf("got %v, want only %v", outboxIDs(got), want)
+	}
+}
+
+func testMarkOutboxSentNotFound(t *testing.T, repo booking.Repository) {
+	ctx := context.Background()
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		return tx.MarkOutboxSent(ctx, newID(), time.Now())
+	})
+	if !errors.Is(err, booking.ErrOutboxNotFound) {
+		t.Errorf("got %v, want ErrOutboxNotFound", err)
+	}
+}
+
+// this is the point of the outbox pattern.
+// we must assure that the booking and the message are atomic together.
+func testOutboxRollsBack(t *testing.T, repo booking.Repository) {
+	ctx := context.Background()
+	b := booking.Booking{ID: newID(), Status: booking.BookingConfirmed}
+	failure := errors.New("fail")
+
+	err := repo.Update(ctx, func(tx booking.Tx) error {
+		if err := tx.InsertBooking(ctx, b); err != nil {
+			return err
+		}
+		m := booking.OutboxMessage{ID: newID(), Kind: booking.OutboxBookingConfirmed, BookingID: b.ID}
+		if err := tx.InsertOutbox(ctx, m); err != nil {
+			return err
+		}
+		return failure
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("got %v, want the failure", err)
+	}
+	if got := listUnsentOutbox(t, repo, 10); len(got) != 0 {
+		t.Errorf("got %d messages after rollback, want 0", len(got))
 	}
 }

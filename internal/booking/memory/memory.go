@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -36,6 +37,7 @@ func NewRepository() *Repository {
 			bookings:     make(map[uuid.UUID]booking.Booking),
 			reservations: make(map[uuid.UUID]booking.Reservation),
 			seats:        make(map[uuid.UUID]booking.Seat),
+			outbox:       make(map[uuid.UUID]booking.OutboxMessage),
 		},
 	}
 }
@@ -77,6 +79,7 @@ type txRepo struct {
 	bookings     map[uuid.UUID]booking.Booking
 	reservations map[uuid.UUID]booking.Reservation
 	seats        map[uuid.UUID]booking.Seat
+	outbox       map[uuid.UUID]booking.OutboxMessage
 }
 
 // clone copies the maps, so a failed Update can be undone.
@@ -89,6 +92,7 @@ func (t *txRepo) clone() txRepo {
 		bookings:     maps.Clone(t.bookings),
 		reservations: maps.Clone(t.reservations),
 		seats:        maps.Clone(t.seats),
+		outbox:       maps.Clone(t.outbox),
 	}
 }
 
@@ -204,4 +208,41 @@ func (t *txRepo) ListShowReservations(ctx context.Context, showID uuid.UUID) ([]
 		}
 	}
 	return result, nil
+}
+
+func (t *txRepo) InsertOutbox(ctx context.Context, m booking.OutboxMessage) error {
+	t.outbox[m.ID] = m
+	return nil
+}
+
+func (t *txRepo) ListUnsentOutbox(ctx context.Context, limit int) ([]booking.OutboxMessage, error) {
+	msgs := make([]booking.OutboxMessage, 0)
+	for _, m := range t.outbox {
+		if m.SentAt.IsZero() {
+			msgs = append(msgs, m)
+		}
+	}
+	// v7 uuids are time ordered, so this is oldest first
+	slices.SortFunc(msgs, func(a, b booking.OutboxMessage) int {
+		return bytes.Compare(a.ID[:], b.ID[:])
+	})
+	if len(msgs) > limit {
+		msgs = msgs[:limit]
+	}
+	return msgs, nil
+}
+
+func (t *txRepo) MarkOutboxSent(ctx context.Context, id uuid.UUID, at time.Time) error {
+	m, ok := t.outbox[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", booking.ErrOutboxNotFound, id)
+	}
+	// first time to be sent we set the time
+	// otherwise we keep as it is.
+	// idempotent!!
+	if m.SentAt.IsZero() {
+		m.SentAt = at
+		t.outbox[id] = m
+	}
+	return nil
 }

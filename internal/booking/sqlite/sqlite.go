@@ -406,3 +406,55 @@ func (t *txRepo) ListShowReservations(ctx context.Context, showID uuid.UUID) ([]
 	}
 	return result, rows.Err()
 }
+
+func (t *txRepo) InsertOutbox(ctx context.Context, m booking.OutboxMessage) error {
+	_, err := t.tx.ExecContext(ctx,
+		`INSERT INTO outbox (id, kind, booking_id, created_at) VALUES (?, ?, ?, ?)`,
+		m.ID, string(m.Kind), m.BookingID, formatTime(m.CreatedAt))
+	return err
+}
+
+func (t *txRepo) ListUnsentOutbox(ctx context.Context, limit int) ([]booking.OutboxMessage, error) {
+	// v7 uuids written as text sort by creation time
+	rows, err := t.tx.QueryContext(ctx,
+		`SELECT id, kind, booking_id, created_at FROM outbox
+		 WHERE sent_at IS NULL ORDER BY id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	msgs := make([]booking.OutboxMessage, 0)
+	for rows.Next() {
+		var m booking.OutboxMessage
+		var kind, createdAt string
+		if err := rows.Scan(&m.ID, &kind, &m.BookingID, &createdAt); err != nil {
+			return nil, err
+		}
+		m.Kind = booking.OutboxKind(kind)
+		if m.CreatedAt, err = parseTime(createdAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+func (t *txRepo) MarkOutboxSent(ctx context.Context, id uuid.UUID, at time.Time) error {
+	// COALESCE keeps the first time if it was already sent,
+	// and the row still counts as matched, so 0 rows means not found
+	res, err := t.tx.ExecContext(ctx,
+		`UPDATE outbox SET sent_at = COALESCE(sent_at, ?) WHERE id = ?`,
+		formatTime(at), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %s", booking.ErrOutboxNotFound, id)
+	}
+	return nil
+}

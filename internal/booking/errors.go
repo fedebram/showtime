@@ -2,9 +2,6 @@ package booking
 
 import "errors"
 
-// just a bunch of sentinel errors.
-// the purpose is that on the http layer we map through http status codes
-
 var (
 	ErrInvalid             = errors.New("invalid request")
 	ErrShowNotFound        = errors.New("show not found")
@@ -16,4 +13,5 @@ var (
 	ErrBookingEmpty        = errors.New("booking has no reservations")
 	ErrReservationNotFound = errors.New("reservation not found")
 	ErrShowAlreadyBooked   = errors.New("show already in booking")
+	ErrOutboxNotFound      = errors.New("outbox message not found")
 )

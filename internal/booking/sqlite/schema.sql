@@ -46,3 +46,14 @@ CREATE TABLE IF NOT EXISTS reservation_seats (
     -- a seat appears at most once in a reservation
     PRIMARY KEY (reservation_id, seat_id)
 ) STRICT;
+
+-- messages for the notification service
+CREATE TABLE IF NOT EXISTS outbox (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    booking_id TEXT NOT NULL REFERENCES bookings (id),
+    created_at TEXT NOT NULL,
+    sent_at    TEXT -- NULL until delivered
+) STRICT;
+-- index on the unsent rows. the relay remains fast even if the sent messages pile up
+CREATE INDEX IF NOT EXISTS outbox_unsent ON outbox (id) WHERE sent_at IS NULL;
