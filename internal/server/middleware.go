@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fedebram/showtime/internal/booking"
-	"github.com/fedebram/showtime/internal/token"
 )
 
 // pretty basic middleware where we hydrate the context key with the booking
@@ -18,21 +17,21 @@ func (s *Server) requireBookingToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := uuid.Parse(r.PathValue("id"))
 		if err != nil {
-			http.Error(w, "invalid booking ID", http.StatusBadRequest)
+			writeErrors(w, http.StatusBadRequest, "invalid booking ID")
 			return
 		}
 
 		secret, ok := bearerToken(r)
 		if !ok {
-			http.Error(w, "missing token", http.StatusUnauthorized)
+			writeErrors(w, http.StatusUnauthorized, "missing token")
 			return
 		}
 
 		// wrong token and missing booking give the same 404.
 		// this way someone can't enumerate bookings.
-		b, ok := s.store.GetBooking(id)
-		if !ok || !token.Matches(secret, b.TokenHash) {
-			http.Error(w, "booking not found", http.StatusNotFound)
+		b, err := s.bookings.Authenticate(r.Context(), id, secret)
+		if err != nil {
+			writeError(w, err)
 			return
 		}
 
