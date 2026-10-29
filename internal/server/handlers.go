@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fedebram/showtime/internal/booking"
+	"github.com/fedebram/showtime/internal/httpjson"
 )
 
 func (s *Server) listShows(w http.ResponseWriter, r *http.Request) {
@@ -14,13 +15,13 @@ func (s *Server) listShows(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, shows)
+	httpjson.WriteJSON(w, http.StatusOK, shows)
 }
 
 func (s *Server) getShow(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		writeErrors(w, http.StatusBadRequest, "invalid show ID")
+		httpjson.WriteErrors(w, http.StatusBadRequest, "invalid show ID")
 		return
 	}
 	show, err := s.bookings.GetShow(r.Context(), id)
@@ -28,7 +29,7 @@ func (s *Server) getShow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, show)
+	httpjson.WriteJSON(w, http.StatusOK, show)
 }
 
 type SeatMapResponse struct {
@@ -41,7 +42,7 @@ type SeatMapResponse struct {
 func (s *Server) seatMap(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		writeErrors(w, http.StatusBadRequest, "invalid show ID")
+		httpjson.WriteErrors(w, http.StatusBadRequest, "invalid show ID")
 		return
 	}
 	seats, err := s.bookings.SeatMap(r.Context(), id)
@@ -56,7 +57,7 @@ func (s *Server) seatMap(w http.ResponseWriter, r *http.Request) {
 			available++
 		}
 	}
-	writeJSON(w, http.StatusOK, SeatMapResponse{
+	httpjson.WriteJSON(w, http.StatusOK, SeatMapResponse{
 		ShowID:    id,
 		Total:     len(seats),
 		Available: available,
@@ -81,7 +82,7 @@ type BookingResponse struct {
 
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	var req CreateBookingRequest
-	if !decodeJSON(w, r, &req) {
+	if !httpjson.DecodeJSON(w, r, &req) {
 		return
 	}
 
@@ -92,7 +93,7 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// the secret is returned only here. the client sends it back as a bearer, we store only its hash
-	writeJSON(w, http.StatusCreated, CreateBookingResponse{
+	httpjson.WriteJSON(w, http.StatusCreated, CreateBookingResponse{
 		Booking:      b,
 		Reservations: reservations,
 		Token:        secret,
@@ -105,7 +106,7 @@ func (s *Server) getBooking(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, BookingResponse{Booking: b, Reservations: reservations})
+	httpjson.WriteJSON(w, http.StatusOK, BookingResponse{Booking: b, Reservations: reservations})
 }
 
 func (s *Server) confirmBooking(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +115,7 @@ func (s *Server) confirmBooking(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, confirmed)
+	httpjson.WriteJSON(w, http.StatusOK, confirmed)
 }
 
 func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
@@ -123,12 +124,12 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cancelled)
+	httpjson.WriteJSON(w, http.StatusOK, cancelled)
 }
 
 func (s *Server) addReservation(w http.ResponseWriter, r *http.Request) {
 	var req booking.ReservationRequest
-	if !decodeJSON(w, r, &req) {
+	if !httpjson.DecodeJSON(w, r, &req) {
 		return
 	}
 	// only what was added: the client keeps adding shows,
@@ -138,7 +139,7 @@ func (s *Server) addReservation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, res)
+	httpjson.WriteJSON(w, http.StatusCreated, res)
 }
 
 func (s *Server) removeReservation(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +147,7 @@ func (s *Server) removeReservation(w http.ResponseWriter, r *http.Request) {
 
 	rid, err := uuid.Parse(r.PathValue("rid"))
 	if err != nil {
-		writeErrors(w, http.StatusBadRequest, "invalid reservation ID")
+		httpjson.WriteErrors(w, http.StatusBadRequest, "invalid reservation ID")
 		return
 	}
 	if err := s.bookings.RemoveReservation(r.Context(), b.ID, rid); err != nil {

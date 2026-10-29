@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fedebram/showtime/internal/booking"
+	"github.com/fedebram/showtime/internal/httpjson"
 )
 
 // pretty basic middleware where we hydrate the context key with the booking
@@ -17,13 +18,13 @@ func (s *Server) requireBookingToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := uuid.Parse(r.PathValue("id"))
 		if err != nil {
-			writeErrors(w, http.StatusBadRequest, "invalid booking ID")
+			httpjson.WriteErrors(w, http.StatusBadRequest, "invalid booking ID")
 			return
 		}
 
 		secret, ok := bearerToken(r)
 		if !ok {
-			writeErrors(w, http.StatusUnauthorized, "missing token")
+			httpjson.WriteErrors(w, http.StatusUnauthorized, "missing token")
 			return
 		}
 
