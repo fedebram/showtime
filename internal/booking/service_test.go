@@ -51,6 +51,22 @@ func newRepo(t *testing.T, b booking.Booking, reservations ...booking.Reservatio
 	return repo
 }
 
+// unsentOutbox returns the unsent outbox messages of repo.
+func unsentOutbox(t *testing.T, repo booking.Repository) []booking.OutboxMessage {
+	t.Helper()
+	ctx := context.Background()
+	var msgs []booking.OutboxMessage
+	err := repo.View(ctx, func(tx booking.Tx) error {
+		var err error
+		msgs, err = tx.ListUnsentOutbox(ctx, 100)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return msgs
+}
+
 // clockAt returns a clock stopped at the given time.
 func clockAt(at time.Time) func() time.Time {
 	return func() time.Time { return at }
@@ -131,11 +147,13 @@ func TestCancelBooking(t *testing.T) {
 		status  booking.BookingStatus
 		now     time.Time
 		wantErr error
+		wantMsg bool // a booking_cancelled message is queued
 	}{
-		{"pending", booking.BookingPending, duringHold, nil},
-		{"confirmed", booking.BookingConfirmed, duringHold, nil},
-		{"expired", booking.BookingPending, afterHold, booking.ErrBookingNotActive},
-		{"already cancelled", booking.BookingCancelled, duringHold, booking.ErrBookingNotActive},
+		// a pending booking was never confirmed: nothing to tell
+		{"pending", booking.BookingPending, duringHold, nil, false},
+		{"confirmed", booking.BookingConfirmed, duringHold, nil, true},
+		{"expired", booking.BookingPending, afterHold, booking.ErrBookingNotActive, false},
+		{"already cancelled", booking.BookingCancelled, duringHold, booking.ErrBookingNotActive, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,6 +166,16 @@ func TestCancelBooking(t *testing.T) {
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("got error %v, want %v", err, tc.wantErr)
 			}
+
+			msgs := unsentOutbox(t, repo)
+			if !tc.wantMsg {
+				if len(msgs) != 0 {
+					t.Fatalf("outbox: got %+v, want none", msgs)
+				}
+			} else if len(msgs) != 1 || msgs[0].Kind != booking.OutboxBookingCancelled || msgs[0].BookingID != b.ID {
+				t.Fatalf("outbox: got %+v, want one booking_cancelled for %s", msgs, b.ID)
+			}
+
 			if tc.wantErr != nil {
 				return
 			}
@@ -193,14 +221,27 @@ func TestConfirmBooking(t *testing.T) {
 			if tc.hasReservations {
 				reservations = append(reservations, booking.Reservation{ID: newID(), BookingID: b.ID})
 			}
-			svc := booking.NewService(newRepo(t, b, reservations...), clockAt(tc.now))
+			repo := newRepo(t, b, reservations...)
+			svc := booking.NewService(repo, clockAt(tc.now))
 
 			got, err := svc.ConfirmBooking(ctx, b.ID)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("got error %v, want %v", err, tc.wantErr)
 			}
+
+			// the message is queued with the confirm, or not at all
+			msgs := unsentOutbox(t, repo)
 			if tc.wantErr != nil {
+				if len(msgs) != 0 {
+					t.Fatalf("outbox: got %d messages after a failed confirm, want 0", len(msgs))
+				}
 				return
+			}
+			if len(msgs) != 1 || msgs[0].Kind != booking.OutboxBookingConfirmed || msgs[0].BookingID != b.ID {
+				t.Fatalf("outbox: got %+v, want one booking_confirmed for %s", msgs, b.ID)
+			}
+			if !msgs[0].CreatedAt.Equal(tc.now) {
+				t.Fatalf("outbox: created at %v, want %v", msgs[0].CreatedAt, tc.now)
 			}
 			if got.Status != booking.BookingConfirmed {
 				t.Fatalf("returned %s, want confirmed", got.Status)

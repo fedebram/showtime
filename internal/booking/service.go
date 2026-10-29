@@ -148,6 +148,7 @@ func (s *Service) GetBooking(ctx context.Context, id uuid.UUID) (Booking, []Rese
 }
 
 // CancelBooking cancels a pending or confirmed booking and returns it.
+// Cancelling a confirmed booking also queues a notification.
 func (s *Service) CancelBooking(ctx context.Context, id uuid.UUID) (Booking, error) {
 	var b Booking
 	err := s.repo.Update(ctx, func(tx Tx) error {
@@ -155,10 +156,18 @@ func (s *Service) CancelBooking(ctx context.Context, id uuid.UUID) (Booking, err
 		if b, err = tx.GetBooking(ctx, id); err != nil {
 			return err
 		}
+		wasConfirmed := b.CurrentStatus(s.now()) == BookingConfirmed
 		if err := b.Cancel(s.now()); err != nil {
 			return err
 		}
-		return tx.UpdateBooking(ctx, b)
+		if err := tx.UpdateBooking(ctx, b); err != nil {
+			return err
+		}
+		// a pending booking was never confirmed: nothing to tell
+		if !wasConfirmed {
+			return nil
+		}
+		return tx.InsertOutbox(ctx, s.newOutboxMessage(OutboxBookingCancelled, b.ID))
 	})
 	if err != nil {
 		return Booking{}, err
@@ -167,6 +176,7 @@ func (s *Service) CancelBooking(ctx context.Context, id uuid.UUID) (Booking, err
 }
 
 // ConfirmBooking confirms a pending booking that has reservations and returns it.
+// It also queues the confirmation notification.
 func (s *Service) ConfirmBooking(ctx context.Context, id uuid.UUID) (Booking, error) {
 	var b Booking
 	err := s.repo.Update(ctx, func(tx Tx) error {
@@ -181,12 +191,29 @@ func (s *Service) ConfirmBooking(ctx context.Context, id uuid.UUID) (Booking, er
 		if err := b.Confirm(s.now(), len(reservations)); err != nil {
 			return err
 		}
-		return tx.UpdateBooking(ctx, b)
+		if err := tx.UpdateBooking(ctx, b); err != nil {
+			return err
+		}
+		// same transaction!!
+		// the booking is confirmed and the notification
+		// is queued together, or neither!
+		// see https://microservices.io/patterns/data/transactional-outbox.html
+		return tx.InsertOutbox(ctx, s.newOutboxMessage(OutboxBookingConfirmed, b.ID))
 	})
 	if err != nil {
 		return Booking{}, err
 	}
 	return b, nil
+}
+
+// newOutboxMessage returns a message of the given kind about a booking.
+func (s *Service) newOutboxMessage(kind OutboxKind, bookingID uuid.UUID) OutboxMessage {
+	return OutboxMessage{
+		ID:        uuid.Must(uuid.NewV7()),
+		Kind:      kind,
+		BookingID: bookingID,
+		CreatedAt: s.now(),
+	}
 }
 
 // RemoveReservation removes a reservation from a pending booking.
