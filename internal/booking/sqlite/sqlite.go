@@ -1,12 +1,22 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+
+	"github.com/fedebram/showtime/internal/booking"
+)
+
+// compile time checks that the sqlite types satisfy the booking interfaces.
+var (
+	_ booking.Repository = (*Repository)(nil)
+	_ booking.Tx         = (*txRepo)(nil)
 )
 
 // the schema is copied into the binary at build time.
@@ -33,6 +43,9 @@ type Repository struct {
 func Open(path string) (*Repository, error) {
 	// basic pragmas for sqlite. no tuning of page cache and so on.
 	// it is out of the scope of the exercise
+
+	// pragma synchronous full is not so much needed.
+	// but is nice to fsync each write.
 
 	write, err := sql.Open("sqlite", "file:"+path+
 		"?_pragma=journal_mode(WAL)"+
@@ -74,4 +87,89 @@ func Open(path string) (*Repository, error) {
 // Close closes both pools.
 func (r *Repository) Close() error {
 	return errors.Join(r.read.Close(), r.write.Close())
+}
+
+// View runs fn in a read transaction on the read pool.
+func (r *Repository) View(ctx context.Context, fn func(tx booking.Tx) error) error {
+	tx, err := r.read.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	// a read keeps nothing: always roll back at the end
+	// commit would work the same
+	defer tx.Rollback()
+	return fn(&txRepo{tx: tx})
+}
+
+// Update runs fn in a write transaction on the write connection:
+// committed if fn returns nil, rolled back if it returns an error.
+func (r *Repository) Update(ctx context.Context, fn func(tx booking.Tx) error) error {
+	tx, err := r.write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	// undoes everything if fn fails; does nothing after a successful Commit
+	defer tx.Rollback()
+
+	if err := fn(&txRepo{tx: tx}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// txRepo does the real work with SQL, inside one transaction.
+// It is only reachable through View and Update.
+type txRepo struct {
+	tx *sql.Tx
+}
+
+// errNotImplemented marks the Tx methods still to write.
+var errNotImplemented = errors.New("not implemented")
+
+func (t *txRepo) InsertSeat(ctx context.Context, s booking.Seat) error {
+	return errNotImplemented
+}
+
+func (t *txRepo) ListSeats(ctx context.Context, roomID uuid.UUID) ([]booking.Seat, error) {
+	return nil, errNotImplemented
+}
+
+func (t *txRepo) ListShows(ctx context.Context) ([]booking.Show, error) {
+	return nil, errNotImplemented
+}
+
+func (t *txRepo) InsertShow(ctx context.Context, s booking.Show) error {
+	return errNotImplemented
+}
+
+func (t *txRepo) GetShow(ctx context.Context, id uuid.UUID) (booking.Show, error) {
+	return booking.Show{}, errNotImplemented
+}
+
+func (t *txRepo) GetBooking(ctx context.Context, id uuid.UUID) (booking.Booking, error) {
+	return booking.Booking{}, errNotImplemented
+}
+
+func (t *txRepo) InsertBooking(ctx context.Context, b booking.Booking) error {
+	return errNotImplemented
+}
+
+func (t *txRepo) UpdateBooking(ctx context.Context, b booking.Booking) error {
+	return errNotImplemented
+}
+
+func (t *txRepo) ListReservations(ctx context.Context, bookingID uuid.UUID) ([]booking.Reservation, error) {
+	return nil, errNotImplemented
+}
+
+func (t *txRepo) InsertReservation(ctx context.Context, r booking.Reservation) error {
+	return errNotImplemented
+}
+
+func (t *txRepo) DeleteReservation(ctx context.Context, bookingID, reservationID uuid.UUID) error {
+	return errNotImplemented
+}
+
+func (t *txRepo) ListShowReservations(ctx context.Context, showID uuid.UUID) ([]booking.ShowReservation, error) {
+	return nil, errNotImplemented
 }
