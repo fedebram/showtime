@@ -518,17 +518,23 @@ func TestAddReservationChangesSeats(t *testing.T) {
 		t.Fatal(err)
 	}
 	a2 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[1].ID}}
-	if _, err := svc.AddReservation(ctx, b.ID, a2); err != nil {
-		t.Fatal(err)
-	}
-
-	// the booking holds only A2
-	_, got, err := svc.GetBooking(ctx, b.ID)
+	res, err := svc.AddReservation(ctx, b.ID, a2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || !slices.Equal(got[0].SeatIDs, a2.SeatIDs) {
-		t.Fatalf("got %v, want only A2", got)
+
+	// the new reservation holds A2
+	if !slices.Equal(res.SeatIDs, a2.SeatIDs) {
+		t.Fatalf("returned %v, want A2", res.SeatIDs)
+	}
+
+	// and the stored booking holds only A2
+	_, stored, err := svc.GetBooking(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || stored[0].ID != res.ID {
+		t.Fatalf("stored %v, want only the new reservation %s", stored, res.ID)
 	}
 }
 
