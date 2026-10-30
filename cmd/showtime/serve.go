@@ -18,6 +18,7 @@ func newServeCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newServeBookingCmd())
 	cmd.AddCommand(newServeNotificationCmd())
+	cmd.AddCommand(newServeGatewayCmd())
 	return cmd
 }
 
