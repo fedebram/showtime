@@ -26,7 +26,7 @@ func main() {
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "showtime",
-		Short: "Cinema bookings: the booking and notification services",
+		Short: "Book seats for movie shows",
 		// a failing server is not a usage mistake: don't print the help
 		SilenceUsage: true,
 		// no "completion" command: shell autocompletion isn't needed for a server binary

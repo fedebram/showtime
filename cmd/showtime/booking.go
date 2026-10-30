@@ -21,7 +21,7 @@ func newServeBookingCmd() *cobra.Command {
 	var addr, db, notificationURL string
 	cmd := &cobra.Command{
 		Use:   "booking",
-		Short: "Run the booking service: shows, seats and bookings",
+		Short: "Shows, seats and bookings",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 

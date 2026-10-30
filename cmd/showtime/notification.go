@@ -18,7 +18,7 @@ func newServeNotificationCmd() *cobra.Command {
 	var addr, db string
 	cmd := &cobra.Command{
 		Use:   "notification",
-		Short: "Run the notification service: receives and sends notifications",
+		Short: "Sends booking notifications",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo, closeRepo, err := openNotificationRepo(db)
 			if err != nil {
