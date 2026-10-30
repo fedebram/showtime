@@ -1,0 +1,31 @@
+x-showtime: &showtime
+  image: ghcr.io/fedebram/showtime:v0.1.0
+  restart: unless-stopped
+
+services:
+  notification:
+    <<: *showtime
+    command: ["serve", "notification", "--db", "/home/nonroot/notification.db"]
+    volumes:
+      - notification-data:/home/nonroot
+
+  booking:
+    <<: *showtime
+    command: ["serve", "booking", "--db", "/home/nonroot/booking.db",
+              "--notification-url", "http://notification:8081"]
+    volumes:
+      - booking-data:/home/nonroot
+    depends_on:
+      - notification
+
+  gateway:
+    <<: *showtime
+    command: ["serve", "gateway", "--booking-url", "http://booking:8080"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      - booking
+
+volumes:
+  notification-data:
+  booking-data:
