@@ -169,3 +169,8 @@ docker compose logs -f notification
 ```
 
 Within about half a minute the message shows up in notification's log.
+
+## License
+
+MIT, see [LICENSE](LICENSE). It is [free software](https://www.gnu.org/philosophy/free-sw.html)
+and open source.
