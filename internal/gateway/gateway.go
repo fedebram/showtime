@@ -3,7 +3,7 @@
 package gateway
 
 import (
-	_ "embed"
+	"embed"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -11,6 +11,11 @@ import (
 
 	"github.com/fedebram/showtime/internal/httpjson"
 )
+
+// the API docs: Swagger UI
+//
+//go:embed docs
+var docsFiles embed.FS
 
 // New returns the gateway handler
 func New(bookingURL *url.URL) http.Handler {
@@ -21,6 +26,11 @@ func New(bookingURL *url.URL) http.Handler {
 	mux.Handle("/shows/", booking)
 	mux.Handle("/bookings", booking)
 	mux.Handle("/bookings/", booking)
+
+	mux.Handle("GET /docs/", http.FileServerFS(docsFiles))
+	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, docsFiles, "docs/index.html")
+	})
 	return mux
 }
 
