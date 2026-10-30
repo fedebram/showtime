@@ -1,0 +1,801 @@
+openapi: 3.1.0
+info:
+  title: Showtime
+  version: 0.1.0
+  # quoted: an unquoted ": " would be read as a YAML key
+  summary: "Book seats for movie shows: find a show, hold seats, confirm."
+  description: |
+    Showtime is the booking API of a movie theater. You find a show, hold seats
+    for it, and confirm the booking within 10 minutes.
+
+    ## The flow
+
+    1. **Find a show.** `GET /shows` lists every show: the movie, the room and
+       when it starts.
+
+    2. **See the seat map.** `GET /shows/{id}/seats` returns the show's seat map:
+       every seat of the room by row and number, each `available` or `held`, and
+       how many are still free. To pick exact seats, take their IDs from here.
+
+    3. **Create a booking.** A booking is your order. It holds one
+       **reservation** per show, and each reservation is the seats you want for
+       that show. With `POST /bookings` you send one or more reservations, each
+       with either:
+       - the exact seats (`seat_ids`, from the seat map), or
+       - how many seats you want (`quantity`): the first free ones are picked.
+
+       It's all or nothing: if any seat can't be had, nothing is held. Otherwise
+       the booking is **pending**: its seats are held for you for 10 minutes, and
+       nobody else can take them. The answer contains the booking's ID and its
+       token.
+
+    4. **Adjust, if you like.** While the booking is pending you can:
+       - add a show: `POST /bookings/{id}/reservations`, with a reservation like
+         in step 3;
+       - remove a show: `DELETE /bookings/{id}/reservations/{rid}`. Its seats are
+         free for others right away.
+
+       To change the seats of a show, remove its reservation and add it again.
+       The 10 minutes don't restart. `GET /bookings/{id}` shows the booking as it
+       is now.
+
+    5. **Confirm or cancel.**
+       - `POST /bookings/{id}/confirm` makes the seats yours, with no time limit,
+         and sends a confirmation. After that the booking can only be cancelled.
+       - `POST /bookings/{id}/cancel` gives the seats back, whether the booking
+         is pending or confirmed.
+
+       If you do neither, the booking **expires** after its 10 minutes and the
+       seats go back to available on their own.
+
+    Steps 4 and 5 need the booking's **token**, from the answer of step 3: click
+    **Authorize** and paste it. It is shown only once.
+
+    ## Booking status
+
+    ```
+    pending ──confirm──► confirmed ──cancel──► cancelled
+       │                                          ▲
+       ├──cancel──────────────────────────────────┘
+       └──10 minutes pass──► expired
+    ```
+
+    Expired and cancelled are final: start a new booking instead. A show that
+    has already started can't be booked.
+
+    ## Errors
+
+    Every error has the same shape: a list of messages. When a request has
+    several problems, they all come back in one answer, so you can fix
+    everything at once:
+
+    ```json
+    {
+      "errors": [
+        "reservations[0]: show_id is required",
+        "reservations[1]: specify either seat_ids or a positive quantity"
+      ]
+    }
+    ```
+
+servers:
+  - url: /
+    description: Local gateway
+
+tags:
+  - name: Shows
+    description: Find a show and see its seat map.
+  - name: Bookings
+    description: Create a booking, adjust it, then confirm or cancel. Every call except creating a booking needs the booking's token.
+
+paths:
+  /shows:
+    get:
+      tags: [Shows]
+      summary: List the shows
+      description: |
+        Every show, in the order they were added: the movie, the room and when
+        it starts.
+
+        Shows that have already started are listed too, but can't be booked:
+        check `starts_at`.
+      operationId: listShows
+      security: []  # public: no token needed
+      responses:
+        "200":
+          description: Every show.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Show" }
+              example:
+                - id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                  movie_title: The Big Lebowski
+                  room_id: 01a1894a-7969-7df0-99d4-3e2f68883600
+                  starts_at: "2026-11-30T18:00:00+01:00"
+                - id: 01a1894a-7969-7df0-99d4-3e2f68883613
+                  movie_title: The Flintstones
+                  room_id: 01a1894a-7969-7df0-99d4-3e2f68883601
+                  starts_at: "2026-11-30T21:00:00+01:00"
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /shows/{id}:
+    get:
+      tags: [Shows]
+      summary: Get a show
+      description: One show by its ID, with the same fields as in the list.
+      operationId: getShow
+      security: []  # public: no token needed
+      parameters:
+        - $ref: "#/components/parameters/ShowID"
+      responses:
+        "200":
+          description: The show.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Show" }
+              example:
+                id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                movie_title: The Big Lebowski
+                room_id: 01a1894a-7969-7df0-99d4-3e2f68883600
+                starts_at: "2026-11-30T18:00:00+01:00"
+        "400": { $ref: "#/components/responses/InvalidShowID" }
+        "404": { $ref: "#/components/responses/ShowNotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /shows/{id}/seats:
+    get:
+      tags: [Shows]
+      summary: Get the seat map
+      description: |
+        Every seat of the show's room, by row and number, each `available` or
+        `held`, and how many are still free.
+
+        A seat is `held` while a booking has it: a pending one within its 10
+        minutes, or a confirmed one. That includes your own booking's seats.
+
+        To ask for exact seats in `POST /bookings`, take their `id`s from here.
+        A show that has already started still has a seat map, but can't be
+        booked.
+      operationId: seatMap
+      security: []  # public: no token needed
+      parameters:
+        - $ref: "#/components/parameters/ShowID"
+      responses:
+        "200":
+          description: The seat map.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SeatMap" }
+              example:
+                show_id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                total: 6
+                available: 4
+                seats:
+                  - { id: 01a1894a-7969-7df0-99d4-3e2f68883701, room_id: 01a1894a-7969-7df0-99d4-3e2f68883600, row: A, number: 1, status: held }
+                  - { id: 01a1894a-7969-7df0-99d4-3e2f68883702, room_id: 01a1894a-7969-7df0-99d4-3e2f68883600, row: A, number: 2, status: held }
+                  - { id: 01a1894a-7969-7df0-99d4-3e2f68883703, room_id: 01a1894a-7969-7df0-99d4-3e2f68883600, row: A, number: 3, status: available }
+                  - { id: 01a1894a-7969-7df0-99d4-3e2f68883704, room_id: 01a1894a-7969-7df0-99d4-3e2f68883600, row: B, number: 1, status: available }
+                  - { id: 01a1894a-7969-7df0-99d4-3e2f68883705, room_id: 01a1894a-7969-7df0-99d4-3e2f68883600, row: B, number: 2, status: available }
+                  - { id: 01a1894a-7969-7df0-99d4-3e2f68883706, room_id: 01a1894a-7969-7df0-99d4-3e2f68883600, row: B, number: 3, status: available }
+        "400": { $ref: "#/components/responses/InvalidShowID" }
+        "404": { $ref: "#/components/responses/ShowNotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /bookings:
+    post:
+      tags: [Bookings]
+      summary: Create a booking
+      description: |
+        Holds seats for one or more shows. Send one reservation per show, each
+        with either the exact seats (`seat_ids`, from the seat map) or how many
+        seats you want (`quantity`): with `quantity`, the first free seats in
+        seat map order are picked, row A first. They aren't guaranteed to be
+        next to each other.
+
+        It's all or nothing: if any seat can't be had, nothing is held and the
+        answer is `409`. Otherwise the booking is **pending**: its seats are
+        held for you for 10 minutes, until `expires_at`.
+
+        The answer contains the booking's **token**, needed for every other
+        booking call. It is shown only here and can't be recovered.
+      operationId: createBooking
+      security: []  # public: no token needed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateBookingRequest" }
+            examples:
+              byQuantity:
+                summary: Any 2 free seats
+                value:
+                  reservations:
+                    - show_id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                      quantity: 2
+              bySeats:
+                summary: Exact seats, from the seat map
+                value:
+                  reservations:
+                    - show_id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                      seat_ids:
+                        - 01a1894a-7969-7df0-99d4-3e2f68883701
+                        - 01a1894a-7969-7df0-99d4-3e2f68883702
+              twoShows:
+                summary: Two shows in one booking
+                value:
+                  reservations:
+                    - show_id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                      quantity: 2
+                    - show_id: 01a1894a-7969-7df0-99d4-3e2f68883613
+                      quantity: 1
+      responses:
+        "201":
+          description: The pending booking, its reservations and its token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateBookingResponse" }
+              example:
+                booking:
+                  id: 01a1894a-7969-7df0-99d4-3e2f68883650
+                  status: pending
+                  created_at: "2026-10-30T17:00:00Z"
+                  expires_at: "2026-10-30T17:10:00Z"
+                reservations:
+                  - id: 01a1894a-7969-7df0-99d4-3e2f68883660
+                    booking_id: 01a1894a-7969-7df0-99d4-3e2f68883650
+                    show_id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                    seat_ids:
+                      - 01a1894a-7969-7df0-99d4-3e2f68883701
+                      - 01a1894a-7969-7df0-99d4-3e2f68883702
+                token: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        "400":
+          description: The request is malformed. Every problem is listed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                incomplete:
+                  summary: A reservation without show or seats
+                  value:
+                    errors:
+                      - "reservations[0]: show_id is required"
+                      - "reservations[0]: specify either seat_ids or a positive quantity"
+                sameShowTwice:
+                  summary: Two reservations for the same show
+                  value: { errors: ["reservations[1]: duplicate show_id: 01a1894a-7969-7df0-99d4-3e2f68883612"] }
+                noReservations:
+                  summary: An empty list
+                  value: { errors: [at least one reservation is required] }
+                badBody:
+                  summary: Not valid JSON, or an unknown field
+                  value: { errors: [invalid request body] }
+        "404":
+          description: A show in the request doesn't exist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              example: { errors: ["show not found: 01a1894a-7969-7df0-99d4-3e2f68883612"] }
+        "409":
+          description: A seat can't be had, or a show has started. Nothing was held.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                seatTaken:
+                  summary: An exact seat is held by another booking
+                  value: { errors: ["seat not available: 01a1894a-7969-7df0-99d4-3e2f68883701"] }
+                tooFew:
+                  summary: Not enough free seats for the quantity
+                  value: { errors: [not enough seats available] }
+                showStarted:
+                  summary: The show has already started
+                  value: { errors: ["show already started: 01a1894a-7969-7df0-99d4-3e2f68883612"] }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /bookings/{id}:
+    get:
+      tags: [Bookings]
+      summary: Get a booking
+      description: |
+        The booking with its status and all its reservations.
+
+        The status is always current: a pending booking shows `expired` as soon
+        as its 10 minutes are over. A booking can be read in any status,
+        expired and cancelled included.
+      operationId: getBooking
+      security:
+        - bookingToken: []
+      parameters:
+        - $ref: "#/components/parameters/BookingID"
+      responses:
+        "200":
+          description: The booking and its reservations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookingResponse" }
+              example:
+                booking:
+                  id: 01a1894a-7969-7df0-99d4-3e2f68883650
+                  status: pending
+                  created_at: "2026-10-30T17:00:00Z"
+                  expires_at: "2026-10-30T17:10:00Z"
+                reservations:
+                  - id: 01a1894a-7969-7df0-99d4-3e2f68883660
+                    booking_id: 01a1894a-7969-7df0-99d4-3e2f68883650
+                    show_id: 01a1894a-7969-7df0-99d4-3e2f68883612
+                    seat_ids:
+                      - 01a1894a-7969-7df0-99d4-3e2f68883701
+                      - 01a1894a-7969-7df0-99d4-3e2f68883702
+        "400": { $ref: "#/components/responses/InvalidBookingID" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/BookingNotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /bookings/{id}/confirm:
+    post:
+      tags: [Bookings]
+      summary: Confirm a booking
+      description: |
+        Makes the seats yours, with no time limit, and sends a confirmation
+        shortly after.
+
+        Only a **pending** booking can be confirmed, before its 10 minutes are
+        over, and only if it has at least one reservation. After that, the
+        booking can only be cancelled.
+      operationId: confirmBooking
+      security:
+        - bookingToken: []
+      parameters:
+        - $ref: "#/components/parameters/BookingID"
+      responses:
+        "200":
+          description: The confirmed booking.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+              example:
+                id: 01a1894a-7969-7df0-99d4-3e2f68883650
+                status: confirmed
+                created_at: "2026-10-30T17:00:00Z"
+                expires_at: "2026-10-30T17:10:00Z"
+        "400": { $ref: "#/components/responses/InvalidBookingID" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/BookingNotFound" }
+        "409":
+          description: The booking isn't pending, or has no reservations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                notPending:
+                  summary: Already confirmed, cancelled, or its 10 minutes are over
+                  value: { errors: [booking is not pending] }
+                empty:
+                  summary: Every reservation was removed
+                  value: { errors: [booking has no reservations] }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /bookings/{id}/cancel:
+    post:
+      tags: [Bookings]
+      summary: Cancel a booking
+      description: |
+        Gives the seats back: they are free for others right away. Works on a
+        pending or a confirmed booking. Cancelling a confirmed booking also
+        sends a notification shortly after.
+
+        Cancelling is final. An expired booking can't be cancelled: its seats
+        are already free.
+      operationId: cancelBooking
+      security:
+        - bookingToken: []
+      parameters:
+        - $ref: "#/components/parameters/BookingID"
+      responses:
+        "200":
+          description: The cancelled booking.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+              example:
+                id: 01a1894a-7969-7df0-99d4-3e2f68883650
+                status: cancelled
+                created_at: "2026-10-30T17:00:00Z"
+                expires_at: "2026-10-30T17:10:00Z"
+        "400": { $ref: "#/components/responses/InvalidBookingID" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/BookingNotFound" }
+        "409":
+          description: The booking is already cancelled or expired.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              example: { errors: [booking is already cancelled or expired] }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /bookings/{id}/reservations:
+    post:
+      tags: [Bookings]
+      summary: Add a show to a booking
+      description: |
+        Holds seats for one more show in a **pending** booking, with a
+        reservation like in `POST /bookings`: exact seats or a quantity. The 10
+        minutes don't restart: the deadline stays the booking's `expires_at`.
+
+        The booking can't already have this show. To change the seats of a
+        show, remove its reservation and add it again.
+
+        The answer is only the new reservation. `GET /bookings/{id}` shows the
+        whole booking.
+      operationId: addReservation
+      security:
+        - bookingToken: []
+      parameters:
+        - $ref: "#/components/parameters/BookingID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReservationRequest" }
+            examples:
+              byQuantity:
+                summary: Any free seat
+                value:
+                  show_id: 01a1894a-7969-7df0-99d4-3e2f68883613
+                  quantity: 1
+              bySeats:
+                summary: An exact seat, from the seat map
+                value:
+                  show_id: 01a1894a-7969-7df0-99d4-3e2f68883613
+                  seat_ids: [01a1894a-7969-7df0-99d4-3e2f68883711]
+      responses:
+        "201":
+          description: The new reservation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reservation" }
+              example:
+                id: 01a1894a-7969-7df0-99d4-3e2f68883661
+                booking_id: 01a1894a-7969-7df0-99d4-3e2f68883650
+                show_id: 01a1894a-7969-7df0-99d4-3e2f68883613
+                seat_ids: [01a1894a-7969-7df0-99d4-3e2f68883711]
+        "400":
+          description: The booking ID isn't a UUID, or the reservation is malformed. Every problem is listed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                incomplete:
+                  summary: A reservation without show or seats
+                  value:
+                    errors:
+                      - show_id is required
+                      - specify either seat_ids or a positive quantity
+                badBody:
+                  summary: Not valid JSON, or an unknown field
+                  value: { errors: [invalid request body] }
+                badID:
+                  summary: The booking ID isn't a UUID
+                  value: { errors: [invalid booking ID] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: No such booking (or the token doesn't match it), or no such show.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                booking:
+                  summary: No such booking, or a wrong token
+                  value: { errors: ["booking not found: 01a1894a-7969-7df0-99d4-3e2f68883650"] }
+                show:
+                  summary: No such show
+                  value: { errors: ["show not found: 01a1894a-7969-7df0-99d4-3e2f68883613"] }
+        "409":
+          description: The booking isn't pending, already has this show, or the seats can't be had.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                notPending:
+                  summary: Confirmed, cancelled, or its 10 minutes are over
+                  value: { errors: [booking is not pending] }
+                sameShow:
+                  summary: This show is already in the booking
+                  value: { errors: ["show already in booking: 01a1894a-7969-7df0-99d4-3e2f68883613"] }
+                seatTaken:
+                  summary: An exact seat is held by another booking
+                  value: { errors: ["seat not available: 01a1894a-7969-7df0-99d4-3e2f68883711"] }
+                tooFew:
+                  summary: Not enough free seats for the quantity
+                  value: { errors: [not enough seats available] }
+                showStarted:
+                  summary: The show has already started
+                  value: { errors: ["show already started: 01a1894a-7969-7df0-99d4-3e2f68883613"] }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /bookings/{id}/reservations/{rid}:
+    delete:
+      tags: [Bookings]
+      summary: Remove a show from a booking
+      description: |
+        Removes a reservation from a **pending** booking. Its seats are free
+        for others right away.
+
+        Removing the last reservation is allowed, but an empty booking can't be
+        confirmed: add a show again first.
+      operationId: removeReservation
+      security:
+        - bookingToken: []
+      parameters:
+        - $ref: "#/components/parameters/BookingID"
+        - name: rid
+          in: path
+          required: true
+          description: "The reservation's ID, from the booking's `reservations`."
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Removed. Nothing is returned; `GET /bookings/{id}` shows the booking.
+        "400":
+          description: The booking ID or the reservation ID isn't a UUID.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                badBookingID:
+                  summary: The booking ID isn't a UUID
+                  value: { errors: [invalid booking ID] }
+                badReservationID:
+                  summary: The reservation ID isn't a UUID
+                  value: { errors: [invalid reservation ID] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: No such booking (or the token doesn't match it), or the reservation isn't in this booking.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              examples:
+                booking:
+                  summary: No such booking, or a wrong token
+                  value: { errors: ["booking not found: 01a1894a-7969-7df0-99d4-3e2f68883650"] }
+                reservation:
+                  summary: The reservation isn't in this booking
+                  value: { errors: ["reservation not found: 01a1894a-7969-7df0-99d4-3e2f68883660"] }
+        "409":
+          description: The booking isn't pending.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Errors" }
+              example: { errors: [booking is not pending] }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+components:
+  securitySchemes:
+    bookingToken:
+      type: http
+      scheme: bearer
+      description: The `token` from `POST /bookings`. It gives access to that one booking only.
+
+  parameters:
+    ShowID:
+      name: id
+      in: path
+      required: true
+      description: The show's ID, from `GET /shows`.
+      schema: { type: string, format: uuid }
+    BookingID:
+      name: id
+      in: path
+      required: true
+      description: The booking's ID, from `POST /bookings`.
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Show:
+      type: object
+      description: One screening of a movie, in a room, at a time.
+      required: [id, movie_title, room_id, starts_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: "The show's ID, for its seat map and for booking it."
+          examples: [01a1894a-7969-7df0-99d4-3e2f68883612]
+        movie_title:
+          type: string
+          description: The movie's title.
+          examples: [The Big Lebowski]
+        room_id:
+          type: string
+          format: uuid
+          description: The room where the show plays. Its seats make the seat map.
+          examples: [01a1894a-7969-7df0-99d4-3e2f68883600]
+        starts_at:
+          type: string
+          format: date-time
+          description: When the show starts. From then on it can't be booked.
+          examples: ["2026-11-30T18:00:00+01:00"]
+
+    SeatAvailability:
+      type: object
+      description: A seat of the room, and whether it can be booked for this show.
+      required: [id, room_id, row, number, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The seat's ID, to ask for this exact seat.
+          examples: [01a1894a-7969-7df0-99d4-3e2f68883701]
+        room_id: { type: string, format: uuid, description: The room the seat is in., examples: [01a1894a-7969-7df0-99d4-3e2f68883600] }
+        row: { type: string, description: The row's letter., examples: [A] }
+        number: { type: integer, minimum: 1, description: The seat's number in its row., examples: [1] }
+        status:
+          type: string
+          enum: [available, held]
+          description: |
+            - `available`: can be booked now.
+            - `held`: a booking has it: a pending one within its 10 minutes, or a confirmed one. Yours included.
+
+    SeatMap:
+      type: object
+      description: The seats of a show's room, and which can still be booked.
+      required: [show_id, total, available, seats]
+      properties:
+        show_id: { type: string, format: uuid, description: The show this seat map is for., examples: [01a1894a-7969-7df0-99d4-3e2f68883612] }
+        total: { type: integer, description: Every seat in the room., examples: [6] }
+        available: { type: integer, description: Seats that can be booked now., examples: [4] }
+        seats:
+          type: array
+          description: Sorted by row, then by number.
+          items: { $ref: "#/components/schemas/SeatAvailability" }
+
+    Booking:
+      type: object
+      description: Your order. It holds one reservation per show, each with the seats you want for that show.
+      required: [id, status, created_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: "The booking's ID. With the token, it's how you reach the booking."
+          examples: [01a1894a-7969-7df0-99d4-3e2f68883650]
+        status:
+          type: string
+          enum: [pending, confirmed, expired, cancelled]
+          description: |
+            - `pending`: holds its seats until `expires_at`, can still change.
+            - `confirmed`: the seats are yours. Can only be cancelled.
+            - `expired`: not confirmed in time. Its seats are free again. Final.
+            - `cancelled`: cancelled by you. Its seats are free again. Final.
+        created_at:
+          type: string
+          format: date-time
+          description: When the booking was created. The 10 minutes start here.
+          examples: ["2026-10-30T17:00:00Z"]
+        expires_at:
+          type: string
+          format: date-time
+          description: The end of the 10 minute hold. Only matters while pending.
+          examples: ["2026-10-30T17:10:00Z"]
+
+    Reservation:
+      type: object
+      description: The seats of one show inside a booking.
+      required: [id, booking_id, show_id, seat_ids]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The reservation's ID, to remove it from the booking.
+          examples: [01a1894a-7969-7df0-99d4-3e2f68883660]
+        booking_id: { type: string, format: uuid, description: The booking it belongs to., examples: [01a1894a-7969-7df0-99d4-3e2f68883650] }
+        show_id: { type: string, format: uuid, description: The show it is for., examples: [01a1894a-7969-7df0-99d4-3e2f68883612] }
+        seat_ids:
+          type: array
+          description: The seats held for this show.
+          items: { type: string, format: uuid }
+          examples: [[01a1894a-7969-7df0-99d4-3e2f68883701, 01a1894a-7969-7df0-99d4-3e2f68883702]]
+
+    ReservationRequest:
+      type: object
+      description: |
+        Seats for one show. Give **exactly one** of:
+        - `seat_ids`: the exact seats, from the seat map. No duplicates.
+        - `quantity`: how many seats. The first free ones in seat map order are picked.
+      required: [show_id]
+      properties:
+        show_id: { type: string, format: uuid, description: "The show's ID, from `GET /shows`." }
+        seat_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: The exact seats, from the show's seat map.
+          items: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, description: How many seats; the first free ones are picked. }
+
+    CreateBookingRequest:
+      type: object
+      description: The reservations to hold, one per show.
+      required: [reservations]
+      properties:
+        reservations:
+          type: array
+          minItems: 1
+          description: At least one, and at most one per show.
+          items: { $ref: "#/components/schemas/ReservationRequest" }
+
+    CreateBookingResponse:
+      type: object
+      description: The new pending booking, its reservations, and its token.
+      required: [booking, reservations, token]
+      properties:
+        booking: { $ref: "#/components/schemas/Booking" }
+        reservations:
+          type: array
+          items: { $ref: "#/components/schemas/Reservation" }
+        token:
+          type: string
+          description: |
+            Needed for every other call on this booking, as
+            `Authorization: Bearer <token>`. Shown only here and can't be recovered.
+          examples: [9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08]
+
+    BookingResponse:
+      type: object
+      description: A booking with all its reservations.
+      required: [booking, reservations]
+      properties:
+        booking: { $ref: "#/components/schemas/Booking" }
+        reservations:
+          type: array
+          items: { $ref: "#/components/schemas/Reservation" }
+
+    Errors:
+      type: object
+      description: Every error answer has this shape, with one message per problem.
+      required: [errors]
+      properties:
+        errors:
+          type: array
+          description: One message per problem.
+          items: { type: string }
+
+  responses:
+    Unauthorized:
+      description: "No token was sent. Send the booking's token as `Authorization: Bearer <token>`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
+          example: { errors: [missing token] }
+    InvalidBookingID:
+      description: The booking ID in the path isn't a valid UUID.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
+          example: { errors: [invalid booking ID] }
+    InvalidShowID:
+      description: The show ID in the path isn't a valid UUID.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
+          example: { errors: [invalid show ID] }
+    ShowNotFound:
+      description: No such show.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
+          example: { errors: ["show not found: 01a1894a-7969-7df0-99d4-3e2f68883612"] }
+    BookingNotFound:
+      description: No such booking, or the token doesn't match it.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
+          example: { errors: ["booking not found: 01a1894a-7969-7df0-99d4-3e2f68883650"] }
+    InternalError:
+      description: Something failed on our side. Try again later.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
+          example: { errors: [internal error] }
