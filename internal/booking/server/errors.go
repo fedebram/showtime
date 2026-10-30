@@ -21,6 +21,7 @@ func writeError(w http.ResponseWriter, err error) {
 		httpjson.WriteErrors(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, booking.ErrSeatUnavailable),
 		errors.Is(err, booking.ErrNotEnoughSeats),
+		errors.Is(err, booking.ErrShowStarted),
 		errors.Is(err, booking.ErrBookingNotPending),
 		errors.Is(err, booking.ErrBookingNotActive),
 		errors.Is(err, booking.ErrBookingEmpty),

@@ -408,15 +408,17 @@ func TestSeatMapShowNotFound(t *testing.T) {
 	}
 }
 
-// newShow saves a show in a room with seats A1, A2, A3 and returns
-// the service, the show and the seats in row order.
-func newShow(t *testing.T) (*booking.Service, booking.Show, []booking.Seat) {
+// newShow saves a show starting a day after created, in a room with seats
+// A1, A2, A3, and returns a service with its clock at now, the show and the
+// seats in row order.
+func newShow(t *testing.T, now time.Time) (*booking.Service, booking.Show, []booking.Seat) {
 	t.Helper()
 	ctx := context.Background()
 	repo := memory.NewRepository()
 
 	room := booking.Room{ID: newID(), Name: "Room 1"}
-	show := booking.Show{ID: newID(), RoomID: room.ID}
+	// tomorrow, from the test clock
+	show := booking.Show{ID: newID(), RoomID: room.ID, StartsAt: created.Add(24 * time.Hour)}
 	seats := []booking.Seat{
 		{ID: newID(), RoomID: room.ID, Row: "A", Number: 1},
 		{ID: newID(), RoomID: room.ID, Row: "A", Number: 2},
@@ -434,12 +436,12 @@ func newShow(t *testing.T) (*booking.Service, booking.Show, []booking.Seat) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return booking.NewService(repo, clockAt(created)), show, seats
+	return booking.NewService(repo, clockAt(now)), show, seats
 }
 
 func TestCreateBookingChoosingSeats(t *testing.T) {
 	ctx := context.Background()
-	svc, show, seats := newShow(t)
+	svc, show, seats := newShow(t, created)
 
 	// we ask for A2 and A3
 	req := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[1].ID, seats[2].ID}}
@@ -459,7 +461,7 @@ func TestCreateBookingChoosingSeats(t *testing.T) {
 
 func TestCreateBookingByQuantity(t *testing.T) {
 	ctx := context.Background()
-	svc, show, seats := newShow(t)
+	svc, show, seats := newShow(t, created)
 
 	// we ask for any 2 seats
 	req := booking.ReservationRequest{ShowID: show.ID, Quantity: 2}
@@ -477,7 +479,7 @@ func TestCreateBookingByQuantity(t *testing.T) {
 
 func TestCreateBookingSeatTaken(t *testing.T) {
 	ctx := context.Background()
-	svc, show, seats := newShow(t)
+	svc, show, seats := newShow(t, created)
 	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
 
 	// someone already booked A1
@@ -496,7 +498,7 @@ func TestCreateBookingSeatTaken(t *testing.T) {
 
 func TestCreateBookingNotEnoughSeats(t *testing.T) {
 	ctx := context.Background()
-	svc, show, _ := newShow(t)
+	svc, show, _ := newShow(t, created)
 
 	// we ask for 4 seats in a room of 3
 	req := booking.ReservationRequest{ShowID: show.ID, Quantity: 4}
@@ -510,7 +512,7 @@ func TestCreateBookingNotEnoughSeats(t *testing.T) {
 
 func TestCreateBookingAllOrNothing(t *testing.T) {
 	ctx := context.Background()
-	svc, show, _ := newShow(t)
+	svc, show, _ := newShow(t, created)
 
 	// one show is fine but the other doesn't exist
 	reqs := []booking.ReservationRequest{
@@ -536,7 +538,7 @@ func TestCreateBookingAllOrNothing(t *testing.T) {
 }
 
 func TestCreateBookingInvalid(t *testing.T) {
-	svc, _, _ := newShow(t)
+	svc, _, _ := newShow(t, created)
 
 	// we send no reservations
 	_, _, _, err := svc.CreateBooking(context.Background(), nil)
@@ -549,7 +551,7 @@ func TestCreateBookingInvalid(t *testing.T) {
 
 func TestAddReservationChangesSeats(t *testing.T) {
 	ctx := context.Background()
-	svc, show, seats := newShow(t)
+	svc, show, seats := newShow(t, created)
 
 	// create a booking holding A1
 	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
@@ -585,7 +587,7 @@ func TestAddReservationChangesSeats(t *testing.T) {
 
 func TestAddReservationShowAlreadyInBooking(t *testing.T) {
 	ctx := context.Background()
-	svc, show, seats := newShow(t)
+	svc, show, seats := newShow(t, created)
 
 	// we create a booking holding A1
 	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
@@ -606,7 +608,7 @@ func TestAddReservationShowAlreadyInBooking(t *testing.T) {
 
 func TestAddReservationNotPending(t *testing.T) {
 	ctx := context.Background()
-	svc, show, seats := newShow(t)
+	svc, show, seats := newShow(t, created)
 
 	// we create and confirm a booking
 	a1 := booking.ReservationRequest{ShowID: show.ID, SeatIDs: []uuid.UUID{seats[0].ID}}
@@ -629,7 +631,7 @@ func TestAddReservationNotPending(t *testing.T) {
 
 func TestAddReservationInvalid(t *testing.T) {
 	ctx := context.Background()
-	svc, show, _ := newShow(t)
+	svc, show, _ := newShow(t, created)
 
 	// we create a reservation request without a quantity or a show ids.
 	_, err := svc.AddReservation(ctx, newID(), booking.ReservationRequest{ShowID: show.ID})
@@ -637,5 +639,32 @@ func TestAddReservationInvalid(t *testing.T) {
 	// it's an invalid request, refused before looking at any booking
 	if !errors.Is(err, booking.ErrInvalid) {
 		t.Fatalf("got %v, want ErrInvalid", err)
+	}
+}
+
+func TestCreateBookingShowStarted(t *testing.T) {
+	ctx := context.Background()
+	startsAt := created.Add(24 * time.Hour)
+
+	cases := []struct {
+		name string
+		now  time.Time
+	}{
+		{"exactly at the start", startsAt},
+		{"after the start", startsAt.Add(time.Minute)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, show, _ := newShow(t, tc.now)
+
+			// we try to book the show once it has started
+			req := booking.ReservationRequest{ShowID: show.ID, Quantity: 1}
+			_, _, _, err := svc.CreateBooking(ctx, []booking.ReservationRequest{req})
+
+			// it's refused
+			if !errors.Is(err, booking.ErrShowStarted) {
+				t.Fatalf("got %v, want ErrShowStarted", err)
+			}
+		})
 	}
 }

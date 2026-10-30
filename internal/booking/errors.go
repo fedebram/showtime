@@ -13,5 +13,6 @@ var (
 	ErrBookingEmpty        = errors.New("booking has no reservations")
 	ErrReservationNotFound = errors.New("reservation not found")
 	ErrShowAlreadyBooked   = errors.New("show already in booking")
+	ErrShowStarted         = errors.New("show already started")
 	ErrOutboxNotFound      = errors.New("outbox message not found")
 )

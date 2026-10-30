@@ -321,6 +321,10 @@ func (s *Service) reserve(ctx context.Context, tx Tx, bookingID uuid.UUID, req R
 	if err != nil {
 		return Reservation{}, err
 	}
+	// a show that has started can't be booked anymore
+	if !s.now().Before(show.StartsAt) {
+		return Reservation{}, fmt.Errorf("%w: %s", ErrShowStarted, show.ID)
+	}
 	seats, err := tx.ListSeats(ctx, show.RoomID)
 	if err != nil {
 		return Reservation{}, err
