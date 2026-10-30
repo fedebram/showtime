@@ -9,14 +9,15 @@ import (
 )
 
 // Seed fills repo with demo data: two rooms of six seats and one show in each.
-// The shows start tomorrow, at 18:00 and 21:00 in now's time zone.
+// The shows are a month from now, at 18:00 and 21:00 in now's time zone, so a
+// database kept for a while still has shows that can be booked.
 func Seed(ctx context.Context, repo booking.Repository, now time.Time) error {
 	room1 := booking.Room{ID: newID(), Name: "Room 1"}
 	room2 := booking.Room{ID: newID(), Name: "Room 2"}
 
-	tomorrow := now.AddDate(0, 0, 1)
+	day := now.AddDate(0, 1, 0)
 	at := func(hour int) time.Time {
-		return time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), hour, 0, 0, 0, now.Location())
+		return time.Date(day.Year(), day.Month(), day.Day(), hour, 0, 0, 0, now.Location())
 	}
 	shows := []booking.Show{
 		{ID: newID(), MovieTitle: "The Big Lebowski", RoomID: room1.ID, StartsAt: at(18)},
