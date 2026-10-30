@@ -26,6 +26,11 @@ The full API, with examples you can try, is at `/docs` once it's running.
 
 You need Docker with Compose, or Podman with podman-compose.
 
+If you don't have Docker on your machine, or you prefer a virtual machine, you
+can use [Lima](https://lima-vm.io/docs/installation/): it runs Docker in a
+small Linux VM with its [docker template](https://lima-vm.io/docs/examples/containers/docker/).
+Lima forwards the ports, so http://localhost:8000/docs works from your machine.
+
 Clone the repository:
 
 ```bash
